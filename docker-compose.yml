@@ -1,0 +1,11 @@
+services:
+  choreboard:
+    build: .
+    ports:
+      - "8888:8080"
+    volumes:
+      - choreboard-data:/data
+    restart: unless-stopped
+
+volumes:
+  choreboard-data:
