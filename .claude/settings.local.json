@@ -4,7 +4,9 @@
       "Bash(export PATH=$PATH:/usr/local/go/bin:*)",
       "Bash(go build:*)",
       "Bash(go get:*)",
-      "Bash(go vet:*)"
+      "Bash(go vet:*)",
+      "Bash(/usr/local/go/bin/go get:*)",
+      "Bash(/usr/local/go/bin/go build:*)"
     ]
   }
 }

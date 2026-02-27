@@ -1,17 +1,37 @@
 package main
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Handlers struct {
-	db *sql.DB
+	db       *sql.DB
+	sessions map[string]*Session
+	mu       sync.RWMutex
+}
+
+type Session struct {
+	UserID   int
+	Username string
+	Role     string
+	Created  time.Time
+}
+
+type User struct {
+	ID        int    `json:"id"`
+	Username  string `json:"username"`
+	Role      string `json:"role"`
+	CreatedAt string `json:"created_at"`
 }
 
 type Child struct {
@@ -70,6 +90,213 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// --- Auth ---
+
+func generateToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func (h *Handlers) createSession(userID int, username, role string) string {
+	token := generateToken()
+	h.mu.Lock()
+	h.sessions[token] = &Session{
+		UserID:   userID,
+		Username: username,
+		Role:     role,
+		Created:  time.Now(),
+	}
+	h.mu.Unlock()
+	return token
+}
+
+func (h *Handlers) getSession(r *http.Request) *Session {
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		return nil
+	}
+	h.mu.RLock()
+	s := h.sessions[cookie.Value]
+	h.mu.RUnlock()
+	return s
+}
+
+func (h *Handlers) deleteSession(token string) {
+	h.mu.Lock()
+	delete(h.sessions, token)
+	h.mu.Unlock()
+}
+
+func (h *Handlers) RequireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.getSession(r) == nil {
+			writeError(w, 401, "Authentication required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+
+	var id int
+	var hash, role string
+	err := h.db.QueryRow("SELECT id, password_hash, role FROM users WHERE username = ?", input.Username).Scan(&id, &hash, &role)
+	if err != nil {
+		writeError(w, 401, "Invalid username or password")
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(input.Password)); err != nil {
+		writeError(w, 401, "Invalid username or password")
+		return
+	}
+
+	token := h.createSession(id, input.Username, role)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	writeJSON(w, 200, map[string]string{"username": input.Username, "role": role})
+}
+
+func (h *Handlers) Logout(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session")
+	if err == nil {
+		h.deleteSession(cookie.Value)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+	})
+	writeJSON(w, 200, map[string]string{"status": "logged out"})
+}
+
+func (h *Handlers) Me(w http.ResponseWriter, r *http.Request) {
+	s := h.getSession(r)
+	if s == nil {
+		writeJSON(w, 200, map[string]interface{}{"authenticated": false})
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"authenticated": true,
+		"username":      s.Username,
+		"role":          s.Role,
+	})
+}
+
+func (h *Handlers) ListUsers(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.db.Query("SELECT id, username, role, created_at FROM users ORDER BY id")
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	users := []User{}
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		users = append(users, u)
+	}
+	writeJSON(w, 200, users)
+}
+
+func (h *Handlers) AddUser(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+	if input.Username == "" || input.Password == "" {
+		writeError(w, 400, "Username and password are required")
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
+	result, err := h.db.Exec("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+		input.Username, string(hash), "admin")
+	if err != nil {
+		writeError(w, 400, "Username already exists")
+		return
+	}
+
+	id, _ := result.LastInsertId()
+	writeJSON(w, 201, User{ID: int(id), Username: input.Username, Role: "admin"})
+}
+
+func (h *Handlers) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var input struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+	if input.Password == "" {
+		writeError(w, 400, "Password is required")
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+
+	_, err = h.db.Exec("UPDATE users SET password_hash = ? WHERE id = ?", string(hash), id)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "password reset"})
+}
+
+func (h *Handlers) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var count int
+	h.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
+	if count <= 1 {
+		writeError(w, 400, "Cannot delete the last user")
+		return
+	}
+
+	_, err := h.db.Exec("DELETE FROM users WHERE id = ?", id)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "deleted"})
 }
 
 // --- Children ---
@@ -575,16 +802,120 @@ func (h *Handlers) ListRedemptions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, redemptions)
 }
 
+// --- Child Assignments ---
+
+func (h *Handlers) GetChildChores(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rows, err := h.db.Query("SELECT chore_id FROM child_chores WHERE child_id = ? ORDER BY chore_id", id)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	ids := []int{}
+	for rows.Next() {
+		var choreId int
+		if err := rows.Scan(&choreId); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		ids = append(ids, choreId)
+	}
+	writeJSON(w, 200, ids)
+}
+
+func (h *Handlers) ToggleChildChore(w http.ResponseWriter, r *http.Request) {
+	childId := chi.URLParam(r, "id")
+	choreId := chi.URLParam(r, "choreId")
+
+	var count int
+	h.db.QueryRow("SELECT COUNT(*) FROM child_chores WHERE child_id = ? AND chore_id = ?", childId, choreId).Scan(&count)
+
+	if count > 0 {
+		_, err := h.db.Exec("DELETE FROM child_chores WHERE child_id = ? AND chore_id = ?", childId, choreId)
+		if err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"assigned": false})
+	} else {
+		_, err := h.db.Exec("INSERT INTO child_chores (child_id, chore_id) VALUES (?, ?)", childId, choreId)
+		if err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"assigned": true})
+	}
+}
+
+func (h *Handlers) GetChildRewards(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rows, err := h.db.Query("SELECT reward_id FROM child_rewards WHERE child_id = ? ORDER BY reward_id", id)
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+
+	ids := []int{}
+	for rows.Next() {
+		var rewardId int
+		if err := rows.Scan(&rewardId); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		ids = append(ids, rewardId)
+	}
+	writeJSON(w, 200, ids)
+}
+
+func (h *Handlers) ToggleChildReward(w http.ResponseWriter, r *http.Request) {
+	childId := chi.URLParam(r, "id")
+	rewardId := chi.URLParam(r, "rewardId")
+
+	var count int
+	h.db.QueryRow("SELECT COUNT(*) FROM child_rewards WHERE child_id = ? AND reward_id = ?", childId, rewardId).Scan(&count)
+
+	if count > 0 {
+		_, err := h.db.Exec("DELETE FROM child_rewards WHERE child_id = ? AND reward_id = ?", childId, rewardId)
+		if err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"assigned": false})
+	} else {
+		_, err := h.db.Exec("INSERT INTO child_rewards (child_id, reward_id) VALUES (?, ?)", childId, rewardId)
+		if err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]bool{"assigned": true})
+	}
+}
+
 // --- Export / Import ---
 
+type ExportChildChore struct {
+	ChildID int `json:"child_id"`
+	ChoreID int `json:"chore_id"`
+}
+
+type ExportChildReward struct {
+	ChildID  int `json:"child_id"`
+	RewardID int `json:"reward_id"`
+}
+
 type DatabaseExport struct {
-	Version     int                `json:"version"`
-	ExportedAt  string             `json:"exported_at"`
-	Children    []Child            `json:"children"`
-	Chores      []Chore            `json:"chores"`
-	Rewards     []Reward           `json:"rewards"`
-	Completions []ExportCompletion `json:"completions"`
-	Redemptions []ExportRedemption `json:"redemptions"`
+	Version      int                 `json:"version"`
+	ExportedAt   string              `json:"exported_at"`
+	Children     []Child             `json:"children"`
+	Chores       []Chore             `json:"chores"`
+	Rewards      []Reward            `json:"rewards"`
+	Completions  []ExportCompletion  `json:"completions"`
+	Redemptions  []ExportRedemption  `json:"redemptions"`
+	ChildChores  []ExportChildChore  `json:"child_chores,omitempty"`
+	ChildRewards []ExportChildReward `json:"child_rewards,omitempty"`
 }
 
 type ExportCompletion struct {
@@ -674,6 +1005,32 @@ func (h *Handlers) ExportDB(w http.ResponseWriter, r *http.Request) {
 		export.Redemptions = append(export.Redemptions, rd)
 	}
 
+	// Child Chores
+	rows6, err := h.db.Query("SELECT child_id, chore_id FROM child_chores ORDER BY child_id, chore_id")
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer rows6.Close()
+	for rows6.Next() {
+		var cc ExportChildChore
+		rows6.Scan(&cc.ChildID, &cc.ChoreID)
+		export.ChildChores = append(export.ChildChores, cc)
+	}
+
+	// Child Rewards
+	rows7, err := h.db.Query("SELECT child_id, reward_id FROM child_rewards ORDER BY child_id, reward_id")
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer rows7.Close()
+	for rows7.Next() {
+		var cr ExportChildReward
+		rows7.Scan(&cr.ChildID, &cr.RewardID)
+		export.ChildRewards = append(export.ChildRewards, cr)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=choreboard-backup-%s.json", time.Now().Format("2006-01-02")))
 	json.NewEncoder(w).Encode(export)
@@ -694,7 +1051,7 @@ func (h *Handlers) ImportDB(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	// Clear all tables (order matters for foreign keys)
-	for _, table := range []string{"redemptions", "completions", "rewards", "chores", "children"} {
+	for _, table := range []string{"child_rewards", "child_chores", "redemptions", "completions", "rewards", "chores", "children"} {
 		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
 			writeError(w, 500, fmt.Sprintf("Failed to clear %s: %v", table, err))
 			return
@@ -755,17 +1112,39 @@ func (h *Handlers) ImportDB(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Insert child chores
+	for _, cc := range data.ChildChores {
+		_, err := tx.Exec("INSERT INTO child_chores (child_id, chore_id) VALUES (?, ?)",
+			cc.ChildID, cc.ChoreID)
+		if err != nil {
+			writeError(w, 500, fmt.Sprintf("Failed to import child chore assignment: %v", err))
+			return
+		}
+	}
+
+	// Insert child rewards
+	for _, cr := range data.ChildRewards {
+		_, err := tx.Exec("INSERT INTO child_rewards (child_id, reward_id) VALUES (?, ?)",
+			cr.ChildID, cr.RewardID)
+		if err != nil {
+			writeError(w, 500, fmt.Sprintf("Failed to import child reward assignment: %v", err))
+			return
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
 
 	writeJSON(w, 200, map[string]interface{}{
-		"status":      "imported",
-		"children":    len(data.Children),
-		"chores":      len(data.Chores),
-		"rewards":     len(data.Rewards),
-		"completions": len(data.Completions),
-		"redemptions": len(data.Redemptions),
+		"status":       "imported",
+		"children":     len(data.Children),
+		"chores":       len(data.Chores),
+		"rewards":      len(data.Rewards),
+		"completions":  len(data.Completions),
+		"redemptions":  len(data.Redemptions),
+		"child_chores": len(data.ChildChores),
+		"child_rewards": len(data.ChildRewards),
 	})
 }

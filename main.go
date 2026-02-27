@@ -26,7 +26,7 @@ func main() {
 	}
 	defer db.Close()
 
-	h := &Handlers{db: db}
+	h := &Handlers{db: db, sessions: make(map[string]*Session)}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -34,32 +34,52 @@ func main() {
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
+		// Public routes
+		r.Post("/login", h.Login)
+		r.Post("/logout", h.Logout)
+		r.Get("/me", h.Me)
+
 		r.Get("/children", h.ListChildren)
-		r.Post("/children", h.AddChild)
-		r.Put("/children/{id}", h.UpdateChild)
-		r.Delete("/children/{id}", h.DeleteChild)
 		r.Get("/children/{id}/points", h.GetPoints)
-
+		r.Get("/children/{id}/chores", h.GetChildChores)
+		r.Get("/children/{id}/rewards", h.GetChildRewards)
 		r.Get("/chores", h.ListChores)
-		r.Post("/chores", h.AddChore)
-		r.Put("/chores/{id}", h.UpdateChore)
-		r.Delete("/chores/{id}", h.DeleteChore)
-
 		r.Get("/rewards", h.ListRewards)
-		r.Post("/rewards", h.AddReward)
-		r.Put("/rewards/{id}", h.UpdateReward)
-		r.Delete("/rewards/{id}", h.DeleteReward)
-
 		r.Get("/completions", h.ListCompletions)
-		r.Post("/completions", h.AddCompletion)
-		r.Delete("/completions/{id}", h.DeleteCompletion)
-
-		r.Post("/redemptions", h.AddRedemption)
 		r.Get("/redemptions", h.ListRedemptions)
-		r.Delete("/redemptions/{id}", h.DeleteRedemption)
 
-		r.Get("/export", h.ExportDB)
-		r.Post("/import", h.ImportDB)
+		r.Post("/completions", h.AddCompletion)
+		r.Post("/redemptions", h.AddRedemption)
+
+		// Protected routes (require authentication)
+		r.Group(func(r chi.Router) {
+			r.Use(h.RequireAuth)
+
+			r.Post("/children", h.AddChild)
+			r.Put("/children/{id}", h.UpdateChild)
+			r.Delete("/children/{id}", h.DeleteChild)
+			r.Post("/children/{id}/chores/{choreId}", h.ToggleChildChore)
+			r.Post("/children/{id}/rewards/{rewardId}", h.ToggleChildReward)
+
+			r.Post("/chores", h.AddChore)
+			r.Put("/chores/{id}", h.UpdateChore)
+			r.Delete("/chores/{id}", h.DeleteChore)
+
+			r.Post("/rewards", h.AddReward)
+			r.Put("/rewards/{id}", h.UpdateReward)
+			r.Delete("/rewards/{id}", h.DeleteReward)
+
+			r.Delete("/completions/{id}", h.DeleteCompletion)
+			r.Delete("/redemptions/{id}", h.DeleteRedemption)
+
+			r.Get("/export", h.ExportDB)
+			r.Post("/import", h.ImportDB)
+
+			r.Get("/users", h.ListUsers)
+			r.Post("/users", h.AddUser)
+			r.Put("/users/{id}/password", h.ResetPassword)
+			r.Delete("/users/{id}", h.DeleteUser)
+		})
 	})
 
 	// Serve static files

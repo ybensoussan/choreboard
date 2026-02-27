@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 
+	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
@@ -26,6 +27,10 @@ func InitDB(path string) (*sql.DB, error) {
 	}
 
 	if err := seed(db); err != nil {
+		return nil, err
+	}
+
+	if err := seedAdmin(db); err != nil {
 		return nil, err
 	}
 
@@ -75,6 +80,30 @@ func migrate(db *sql.DB) error {
 		reward_id INTEGER NOT NULL,
 		points_cost INTEGER NOT NULL,
 		redeemed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE,
+		FOREIGN KEY (reward_id) REFERENCES rewards(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		role TEXT NOT NULL DEFAULT 'admin',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS child_chores (
+		child_id INTEGER NOT NULL,
+		chore_id INTEGER NOT NULL,
+		PRIMARY KEY (child_id, chore_id),
+		FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE,
+		FOREIGN KEY (chore_id) REFERENCES chores(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS child_rewards (
+		child_id INTEGER NOT NULL,
+		reward_id INTEGER NOT NULL,
+		PRIMARY KEY (child_id, reward_id),
 		FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE,
 		FOREIGN KEY (reward_id) REFERENCES rewards(id) ON DELETE CASCADE
 	);
@@ -245,5 +274,28 @@ func seed(db *sql.DB) error {
 	}
 
 	log.Println("Database seeded successfully!")
+	return nil
+}
+
+func seedAdmin(db *sql.DB) error {
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+
+	log.Println("Seeding default admin user...")
+	hash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+		"admin", string(hash), "admin")
+	if err != nil {
+		return err
+	}
+	log.Println("Default admin user created (username: admin, password: admin)")
 	return nil
 }

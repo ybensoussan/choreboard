@@ -2,9 +2,16 @@
 // ChoreBoard - Frontend Application
 // ============================================
 
+function handleAuthError() {
+    state.auth = { authenticated: false, username: '', role: '' };
+    updateAuthUI();
+    showLoginModal();
+}
+
 const API = {
     async get(url) {
         const res = await fetch(url);
+        if (res.status === 401) { handleAuthError(); return { error: 'Authentication required' }; }
         return res.json();
     },
     async post(url, data) {
@@ -13,6 +20,7 @@ const API = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
         });
+        if (res.status === 401) { handleAuthError(); return { error: 'Authentication required' }; }
         return res.json();
     },
     async put(url, data) {
@@ -21,10 +29,12 @@ const API = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
         });
+        if (res.status === 401) { handleAuthError(); return { error: 'Authentication required' }; }
         return res.json();
     },
     async del(url) {
         const res = await fetch(url, { method: 'DELETE' });
+        if (res.status === 401) { handleAuthError(); return { error: 'Authentication required' }; }
         return res.json();
     },
 };
@@ -112,12 +122,16 @@ const state = {
     calendarDate: new Date(),
     selectedDate: null,
     activeDate: ds(new Date()),
+    auth: { authenticated: false, username: '', role: '' },
+    childChores: {},   // childId -> [choreId, ...]
+    childRewards: {},  // childId -> [rewardId, ...]
 };
 
 // Editing state for settings
 let editingChildId = null;
 let editingChoreId = null;
 let editingRewardId = null;
+let assigningChildId = null;
 
 // ============================================
 // Toast Notifications
@@ -149,6 +163,7 @@ function showToast(message, type = 'error', duration = 3500) {
 // ============================================
 
 async function init() {
+    await checkAuth();
     await loadChildren();
     await loadChores();
     await loadRewards();
@@ -156,12 +171,15 @@ async function init() {
     if (state.children.length > 0) {
         state.currentChildId = state.children[0].id;
         await loadPoints();
+        await loadChildAssignments(state.currentChildId);
     }
 
     renderChildSelector();
     renderTab();
     setupNavigation();
     setupEmojiPicker();
+    setupAuth();
+    updateAuthUI();
 }
 
 // ============================================
@@ -187,6 +205,28 @@ async function loadPoints() {
     document.getElementById('points-count').textContent = state.points;
 }
 
+async function loadChildAssignments(childId) {
+    if (!childId) return;
+    const [chores, rewards] = await Promise.all([
+        API.get(`/api/children/${childId}/chores`),
+        API.get(`/api/children/${childId}/rewards`),
+    ]);
+    state.childChores[childId] = chores.error ? [] : chores;
+    state.childRewards[childId] = rewards.error ? [] : rewards;
+}
+
+function getChoresForChild(childId) {
+    const assigned = state.childChores[childId];
+    if (!assigned || assigned.length === 0) return state.chores;
+    return state.chores.filter(c => assigned.includes(c.id));
+}
+
+function getRewardsForChild(childId) {
+    const assigned = state.childRewards[childId];
+    if (!assigned || assigned.length === 0) return state.rewards;
+    return state.rewards.filter(r => assigned.includes(r.id));
+}
+
 // ============================================
 // Navigation
 // ============================================
@@ -194,9 +234,14 @@ async function loadPoints() {
 function setupNavigation() {
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            if ((tab === 'settings' || tab === 'print') && !state.auth.authenticated) {
+                showLoginModal();
+                return;
+            }
             document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            state.currentTab = btn.dataset.tab;
+            state.currentTab = tab;
             renderTab();
         });
     });
@@ -211,6 +256,133 @@ function renderTab() {
         case 'print': renderPrintTab(main); break;
         case 'settings': renderSettings(main); break;
     }
+}
+
+// ============================================
+// Auth
+// ============================================
+
+async function checkAuth() {
+    try {
+        const data = await fetch('/api/me').then(r => r.json());
+        state.auth = {
+            authenticated: !!data.authenticated,
+            username: data.username || '',
+            role: data.role || '',
+        };
+    } catch {
+        state.auth = { authenticated: false, username: '', role: '' };
+    }
+}
+
+function setupAuth() {
+    document.getElementById('profile-btn').addEventListener('click', () => {
+        if (state.auth.authenticated) {
+            showProfileModal();
+        } else {
+            showLoginModal();
+        }
+    });
+
+    document.getElementById('login-close').addEventListener('click', closeLoginModal);
+    document.getElementById('login-overlay').addEventListener('click', (e) => {
+        if (e.target.id === 'login-overlay') closeLoginModal();
+    });
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await doLogin();
+    });
+}
+
+function showLoginModal() {
+    const overlay = document.getElementById('login-overlay');
+    document.getElementById('login-modal-title').textContent = 'Login';
+    document.getElementById('login-modal-body').innerHTML = `
+        <form class="login-form" id="login-form">
+            <input type="text" id="login-username" placeholder="Username" autocomplete="username" required>
+            <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required>
+            <div id="login-error" class="login-error"></div>
+            <button type="submit" class="login-submit-btn">Login</button>
+        </form>`;
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await doLogin();
+    });
+    overlay.classList.remove('hidden');
+    setTimeout(() => document.getElementById('login-username').focus(), 100);
+}
+
+function showProfileModal() {
+    const overlay = document.getElementById('login-overlay');
+    document.getElementById('login-modal-title').textContent = 'Profile';
+    document.getElementById('login-modal-body').innerHTML = `
+        <div class="logged-in-info">
+            <div class="logged-in-user">${state.auth.username}</div>
+            <div class="logged-in-role">${state.auth.role}</div>
+            <button class="logout-btn" id="do-logout">Logout</button>
+        </div>`;
+    document.getElementById('do-logout').addEventListener('click', async () => {
+        await doLogout();
+        closeLoginModal();
+    });
+    overlay.classList.remove('hidden');
+}
+
+function closeLoginModal() {
+    document.getElementById('login-overlay').classList.add('hidden');
+}
+
+async function doLogin() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+    const errorEl = document.getElementById('login-error');
+
+    if (!username || !password) {
+        errorEl.textContent = 'Please enter username and password';
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            state.auth = { authenticated: true, username: data.username, role: data.role };
+            updateAuthUI();
+            closeLoginModal();
+        } else {
+            errorEl.textContent = data.error || 'Login failed';
+        }
+    } catch {
+        errorEl.textContent = 'Connection error';
+    }
+}
+
+async function doLogout() {
+    await fetch('/api/logout', { method: 'POST' });
+    state.auth = { authenticated: false, username: '', role: '' };
+    updateAuthUI();
+    if (state.currentTab === 'settings' || state.currentTab === 'print') {
+        state.currentTab = 'chores';
+        document.querySelectorAll('.nav-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.tab === 'chores');
+        });
+        renderTab();
+    }
+}
+
+function updateAuthUI() {
+    const profileBtn = document.getElementById('profile-btn');
+    profileBtn.classList.toggle('logged-in', state.auth.authenticated);
+    profileBtn.title = state.auth.authenticated ? state.auth.username : 'Login';
+
+    document.querySelectorAll('.nav-btn[data-tab="print"], .nav-btn[data-tab="settings"]').forEach(btn => {
+        btn.classList.toggle('auth-hidden', !state.auth.authenticated);
+    });
 }
 
 // ============================================
@@ -296,6 +468,7 @@ function renderChildSelector() {
         tab.addEventListener('click', async () => {
             state.currentChildId = parseInt(tab.dataset.id);
             await loadPoints();
+            await loadChildAssignments(state.currentChildId);
             renderChildSelector();
             renderTab();
         });
@@ -329,7 +502,8 @@ async function renderChores(main) {
     const animate = choreFirstRender;
     choreFirstRender = false;
 
-    let cards = state.chores.map((chore, i) => {
+    const childChores = getChoresForChild(state.currentChildId);
+    let cards = childChores.map((chore, i) => {
         const count = completionCounts.get(chore.id) || 0;
         const done = count > 0;
 
@@ -374,7 +548,7 @@ async function renderChores(main) {
         </div>`;
     }).join('');
 
-    if (state.chores.length === 0) {
+    if (childChores.length === 0) {
         main.innerHTML = `<div class="empty-state"><div class="emoji">📝</div><p>No chores yet! Add some in Settings.</p></div>`;
         return;
     }
@@ -679,9 +853,10 @@ async function renderRewardsTab(main) {
     }
 
     // Available rewards grid
+    const childRewards = getRewardsForChild(state.currentChildId);
     html += '<div class="section-title">Available Rewards</div><div class="rewards-grid">';
 
-    state.rewards.forEach(reward => {
+    childRewards.forEach(reward => {
         const pct = Math.min(100, (state.points / reward.points_cost) * 100);
         const canClaim = state.points >= reward.points_cost;
         const freqLabel = { continuous: '', daily: '1/day', weekly: '1/week' }[reward.claim_frequency || 'continuous'];
@@ -702,7 +877,7 @@ async function renderRewardsTab(main) {
 
     html += '</div>';
 
-    if (state.rewards.length === 0) {
+    if (childRewards.length === 0) {
         html = `<div class="empty-state"><div class="emoji">🎁</div><p>No rewards yet! Add some in Settings.</p></div>`;
     }
 
@@ -801,7 +976,7 @@ function renderChartPreview() {
     const child = state.children.find(c => c.id === childId);
     const childName = child ? `${child.emoji} ${child.name}` : 'Child';
 
-    let chores = state.chores;
+    let chores = getChoresForChild(childId);
     if (filter !== 'all') chores = chores.filter(c => c.frequency === filter);
 
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -886,13 +1061,56 @@ function renderSettings(main) {
                         <button class="cancel-edit-btn" data-cancel="child">Cancel</button>
                     </li>`;
                 }
+                let assignSection = '';
+                if (assigningChildId === c.id) {
+                    const assignedChores = state.childChores[c.id] || [];
+                    const assignedRewards = state.childRewards[c.id] || [];
+                    assignSection = `
+                    <div class="assign-section" data-child-id="${c.id}">
+                        <div class="assign-header">
+                            <span>Chores</span>
+                            <div class="assign-actions">
+                                <button class="assign-action-btn" data-select-all="chore" data-child-id="${c.id}">Select All</button>
+                                <button class="assign-action-btn" data-clear-all="chore" data-child-id="${c.id}">Clear All</button>
+                            </div>
+                        </div>
+                        <div class="assign-grid">
+                            ${state.chores.map(ch => `
+                                <label class="assign-item">
+                                    <input type="checkbox" data-type="chore" data-child-id="${c.id}" data-item-id="${ch.id}"
+                                        ${assignedChores.includes(ch.id) ? 'checked' : ''}>
+                                    <span class="assign-emoji">${ch.emoji}</span>
+                                    <span class="assign-name">${ch.name}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                        <div class="assign-header">
+                            <span>Rewards</span>
+                            <div class="assign-actions">
+                                <button class="assign-action-btn" data-select-all="reward" data-child-id="${c.id}">Select All</button>
+                                <button class="assign-action-btn" data-clear-all="reward" data-child-id="${c.id}">Clear All</button>
+                            </div>
+                        </div>
+                        <div class="assign-grid">
+                            ${state.rewards.map(rw => `
+                                <label class="assign-item">
+                                    <input type="checkbox" data-type="reward" data-child-id="${c.id}" data-item-id="${rw.id}"
+                                        ${assignedRewards.includes(rw.id) ? 'checked' : ''}>
+                                    <span class="assign-emoji">${rw.emoji}</span>
+                                    <span class="assign-name">${rw.name}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>`;
+                }
                 return `<li>
                     <span class="item-emoji">${c.emoji}</span>
                     <span class="item-name">${c.name}</span>
                     <span class="item-color" style="background: ${c.color}"></span>
+                    <button class="assign-btn ${assigningChildId === c.id ? 'active' : ''}" data-assign="child" data-id="${c.id}" title="Assign chores & rewards">📋</button>
                     <button class="edit-btn" data-edit="child" data-id="${c.id}" title="Edit">${SVG_EDIT}</button>
                     <button class="delete-btn" data-delete="child" data-id="${c.id}" title="Remove">✕</button>
-                </li>`;
+                </li>${assignSection}`;
             }).join('')}
         </ul>
         <div class="add-form">
@@ -1012,8 +1230,21 @@ function renderSettings(main) {
         <div id="import-status"></div>
     </div>`;
 
+    // --- User Management Section ---
+    html += `
+    <div class="settings-section">
+        <h3>🔑 User Management</h3>
+        <div id="users-list"></div>
+        <div class="add-form">
+            <input type="text" placeholder="Username" id="add-user-name" maxlength="30">
+            <input type="password" placeholder="Password" id="add-user-password" maxlength="50">
+            <button class="add-btn" id="add-user-btn">+ Add User</button>
+        </div>
+    </div>`;
+
     main.innerHTML = html;
     bindSettingsEvents(main);
+    loadUsersList();
 }
 
 function bindSettingsEvents(main) {
@@ -1087,6 +1318,72 @@ function bindSettingsEvents(main) {
             if (type === 'child') editingChildId = id;
             else if (type === 'chore') editingChoreId = id;
             else if (type === 'reward') editingRewardId = id;
+            renderSettings(main);
+        });
+    });
+
+    // --- Assign buttons ---
+    main.querySelectorAll('[data-assign]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id = parseInt(btn.dataset.id);
+            if (assigningChildId === id) {
+                assigningChildId = null;
+            } else {
+                assigningChildId = id;
+                await loadChildAssignments(id);
+            }
+            renderSettings(main);
+        });
+    });
+
+    // --- Assignment checkboxes ---
+    main.querySelectorAll('.assign-section input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', async () => {
+            const childId = parseInt(cb.dataset.childId);
+            const itemId = parseInt(cb.dataset.itemId);
+            const type = cb.dataset.type;
+            const url = type === 'chore'
+                ? `/api/children/${childId}/chores/${itemId}`
+                : `/api/children/${childId}/rewards/${itemId}`;
+            const result = await API.post(url);
+            if (!result.error) {
+                await loadChildAssignments(childId);
+            }
+        });
+    });
+
+    // --- Select All / Clear All ---
+    main.querySelectorAll('[data-select-all]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const type = btn.dataset.selectAll;
+            const childId = parseInt(btn.dataset.childId);
+            const items = type === 'chore' ? state.chores : state.rewards;
+            const assigned = type === 'chore' ? (state.childChores[childId] || []) : (state.childRewards[childId] || []);
+            for (const item of items) {
+                if (!assigned.includes(item.id)) {
+                    const url = type === 'chore'
+                        ? `/api/children/${childId}/chores/${item.id}`
+                        : `/api/children/${childId}/rewards/${item.id}`;
+                    await API.post(url);
+                }
+            }
+            await loadChildAssignments(childId);
+            renderSettings(main);
+        });
+    });
+
+    main.querySelectorAll('[data-clear-all]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const type = btn.dataset.clearAll;
+            const childId = parseInt(btn.dataset.childId);
+            const assigned = type === 'chore' ? (state.childChores[childId] || []) : (state.childRewards[childId] || []);
+            for (const itemId of assigned) {
+                const url = type === 'chore'
+                    ? `/api/children/${childId}/chores/${itemId}`
+                    : `/api/children/${childId}/rewards/${itemId}`;
+                await API.post(url);
+            }
+            await loadChildAssignments(childId);
             renderSettings(main);
         });
     });
@@ -1241,6 +1538,62 @@ function bindSettingsEvents(main) {
             statusEl.className = 'import-status-msg error';
         }
         e.target.value = '';
+    });
+
+    // --- Add User ---
+    document.getElementById('add-user-btn').addEventListener('click', async () => {
+        const username = document.getElementById('add-user-name').value.trim();
+        const password = document.getElementById('add-user-password').value;
+        if (!username || !password) return;
+        const result = await API.post('/api/users', { username, password });
+        if (result.error) {
+            showToast(result.error, 'error');
+            return;
+        }
+        document.getElementById('add-user-name').value = '';
+        document.getElementById('add-user-password').value = '';
+        loadUsersList();
+    });
+}
+
+async function loadUsersList() {
+    const container = document.getElementById('users-list');
+    if (!container) return;
+    const users = await API.get('/api/users');
+    if (users.error) return;
+
+    container.innerHTML = users.map(u => `
+        <div class="user-item">
+            <span class="user-name">${u.username}</span>
+            <span class="user-role">${u.role}</span>
+            <button class="reset-pw-btn" data-user-id="${u.id}">Reset Password</button>
+            <button class="delete-btn" data-delete-user="${u.id}" title="Remove">✕</button>
+        </div>
+    `).join('');
+
+    container.querySelectorAll('.reset-pw-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const newPw = prompt('Enter new password:');
+            if (!newPw) return;
+            const result = await API.put(`/api/users/${btn.dataset.userId}/password`, { password: newPw });
+            if (result.error) {
+                showToast(result.error, 'error');
+            } else {
+                showToast('Password reset', 'success');
+            }
+        });
+    });
+
+    container.querySelectorAll('[data-delete-user]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('Delete this user?')) return;
+            const result = await API.del(`/api/users/${btn.dataset.deleteUser}`);
+            if (result.error) {
+                showToast(result.error, 'error');
+            } else {
+                loadUsersList();
+            }
+        });
     });
 }
 

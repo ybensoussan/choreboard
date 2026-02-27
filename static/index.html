@@ -23,6 +23,9 @@
                 <svg class="points-star" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                 <span id="points-count">0</span>
             </div>
+            <button id="profile-btn" class="profile-btn" title="Login">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </button>
         </div>
     </header>
 
@@ -46,6 +49,24 @@
         </div>
     </div>
 
+    <!-- Login / Profile Modal -->
+    <div id="login-overlay" class="picker-overlay hidden">
+        <div class="picker-modal login-modal">
+            <div class="picker-header">
+                <span class="picker-title" id="login-modal-title">Login</span>
+                <button class="picker-close" id="login-close">&times;</button>
+            </div>
+            <div id="login-modal-body">
+                <form class="login-form" id="login-form">
+                    <input type="text" id="login-username" placeholder="Username" autocomplete="username" required>
+                    <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required>
+                    <div id="login-error" class="login-error"></div>
+                    <button type="submit" class="login-submit-btn">Login</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Bottom Navigation -->
     <nav id="bottom-nav">
         <button class="nav-btn active" data-tab="chores">
@@ -60,11 +81,11 @@
             <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5C7 4 9 7 9 7h6s2-3 4.5-3a2.5 2.5 0 0 1 0 5H18"/><path d="M18 9v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9"/><path d="M12 9v12"/><path d="M6 9h12"/></svg>
             <span class="nav-label">Rewards</span>
         </button>
-        <button class="nav-btn" data-tab="print">
+        <button class="nav-btn auth-hidden" data-tab="print">
             <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6"/><rect width="12" height="8" x="6" y="14" rx="1"/></svg>
             <span class="nav-label">Print</span>
         </button>
-        <button class="nav-btn" data-tab="settings">
+        <button class="nav-btn auth-hidden" data-tab="settings">
             <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
             <span class="nav-label">Settings</span>
         </button>

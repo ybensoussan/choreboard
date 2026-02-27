@@ -147,6 +147,192 @@ body {
 }
 
 /* ============================================
+   Profile Button
+   ============================================ */
+
+.profile-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.2);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.2s;
+    padding: 0;
+}
+
+.profile-btn svg {
+    width: 18px;
+    height: 18px;
+    color: white;
+}
+
+.profile-btn:hover {
+    background: rgba(255,255,255,0.35);
+    transform: scale(1.08);
+}
+
+.profile-btn.logged-in {
+    background: white;
+    border-color: white;
+}
+
+.profile-btn.logged-in svg {
+    color: var(--pink);
+}
+
+/* ============================================
+   Auth Hidden
+   ============================================ */
+
+.auth-hidden {
+    display: none !important;
+}
+
+/* ============================================
+   Login Modal
+   ============================================ */
+
+.login-modal {
+    max-width: 320px;
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px 16px;
+}
+
+.login-form input {
+    font-family: inherit;
+    font-size: 0.95rem;
+    padding: 10px 14px;
+    border: 2px solid #eee;
+    border-radius: var(--radius-sm);
+    outline: none;
+    transition: border-color 0.2s;
+    font-weight: 600;
+}
+
+.login-form input:focus {
+    border-color: var(--pink);
+}
+
+.login-submit-btn {
+    background: linear-gradient(135deg, var(--pink), var(--purple));
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.login-submit-btn:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 15px rgba(255, 107, 157, 0.4);
+}
+
+.login-error {
+    color: #c62828;
+    font-size: 0.85rem;
+    font-weight: 600;
+    min-height: 0;
+}
+
+.login-error:empty {
+    display: none;
+}
+
+.logged-in-info {
+    padding: 20px 16px;
+    text-align: center;
+}
+
+.logged-in-info .logged-in-user {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.logged-in-info .logged-in-role {
+    font-size: 0.82rem;
+    color: var(--text-light);
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+.logout-btn {
+    background: linear-gradient(135deg, var(--pink), #ff4757);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 10px 24px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.logout-btn:hover {
+    transform: scale(1.03);
+}
+
+/* ============================================
+   User Management
+   ============================================ */
+
+.user-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f5f5f5;
+}
+
+.user-item:last-child {
+    border-bottom: none;
+}
+
+.user-item .user-name {
+    flex: 1;
+    font-weight: 600;
+    font-size: 0.92rem;
+}
+
+.user-item .user-role {
+    font-size: 0.78rem;
+    color: var(--text-light);
+    font-weight: 600;
+}
+
+.reset-pw-btn {
+    background: none;
+    border: 1px solid var(--blue);
+    color: var(--blue);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 50px;
+    transition: all 0.2s;
+}
+
+.reset-pw-btn:hover {
+    background: rgba(78, 205, 196, 0.1);
+}
+
+/* ============================================
    Bottom Navigation
    ============================================ */
 
@@ -801,6 +987,107 @@ body {
 }
 
 .delete-btn:hover { background: rgba(255, 107, 107, 0.1); }
+
+.assign-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 4px;
+    border-radius: 8px;
+    transition: all 0.2s;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+}
+
+.assign-btn:hover { background: rgba(167, 139, 250, 0.15); }
+.assign-btn.active { background: rgba(167, 139, 250, 0.2); }
+
+.assign-section {
+    padding: 12px 0 8px;
+    border-bottom: 1px solid #f5f5f5;
+    animation: slideUp 0.2s ease;
+}
+
+.assign-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    padding: 0 4px;
+}
+
+.assign-header span {
+    font-size: 0.88rem;
+    font-weight: 800;
+    color: var(--purple);
+}
+
+.assign-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.assign-action-btn {
+    background: none;
+    border: 1px solid #ddd;
+    color: var(--text-light);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 50px;
+    transition: all 0.2s;
+}
+
+.assign-action-btn:hover {
+    background: rgba(167, 139, 250, 0.1);
+    border-color: var(--purple);
+    color: var(--purple);
+}
+
+.assign-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.assign-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    font-size: 0.85rem;
+}
+
+.assign-item:hover {
+    background: #f8f0ff;
+}
+
+.assign-item input[type="checkbox"] {
+    accent-color: var(--purple);
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.assign-emoji {
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.assign-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 .edit-btn {
     background: none;
