@@ -40,6 +40,22 @@ const API = {
 };
 
 // ============================================
+// Emoji → Twemoji SVG URL
+// ============================================
+
+function emojiToImgUrl(emoji) {
+    const codePoints = [...emoji]
+        .map(c => c.codePointAt(0).toString(16).toLowerCase())
+        .filter(cp => cp !== 'fe0f');
+    return `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/svg/${codePoints.join('-')}.svg`;
+}
+
+function emojiImg(emoji, cls) {
+    const src = emojiToImgUrl(emoji);
+    return `<img class="${cls}" src="${src}" alt="${emoji}" onerror="this.outerHTML='<span style=\\'font-size:4rem;line-height:1\\'>${emoji}</span>'">`;
+}
+
+// ============================================
 // Emoji Sets — large varied collections
 // ============================================
 
@@ -132,6 +148,7 @@ let editingChildId = null;
 let editingChoreId = null;
 let editingRewardId = null;
 let assigningChildId = null;
+let settingsContentTab = 'chores';
 
 // ============================================
 // Toast Notifications
@@ -386,6 +403,35 @@ function updateAuthUI() {
 }
 
 // ============================================
+// Custom Confirm Dialog
+// ============================================
+
+function showConfirm({ icon, title, message, okLabel = 'Remove' }) {
+    return new Promise(resolve => {
+        document.getElementById('confirm-icon').innerHTML = emojiImg(icon, 'assign-emoji-img');
+        document.getElementById('confirm-title').textContent = title;
+        document.getElementById('confirm-msg').textContent = message;
+        document.getElementById('confirm-ok').textContent = okLabel;
+        const overlay = document.getElementById('confirm-overlay');
+        overlay.classList.remove('hidden');
+
+        const ok = document.getElementById('confirm-ok');
+        const cancel = document.getElementById('confirm-cancel');
+
+        function cleanup(result) {
+            overlay.classList.add('hidden');
+            ok.replaceWith(ok.cloneNode(true));
+            cancel.replaceWith(cancel.cloneNode(true));
+            resolve(result);
+        }
+
+        document.getElementById('confirm-ok').addEventListener('click', () => cleanup(true), { once: true });
+        document.getElementById('confirm-cancel').addEventListener('click', () => cleanup(false), { once: true });
+        overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(false); }, { once: true });
+    });
+}
+
+// ============================================
 // Emoji Picker
 // ============================================
 
@@ -402,7 +448,7 @@ function setupEmojiPicker() {
 function openEmojiPicker(emojis, callback) {
     emojiPickerCallback = callback;
     const grid = document.getElementById('emoji-picker-grid');
-    grid.innerHTML = emojis.map(e => `<button data-emoji="${e}">${e}</button>`).join('');
+    grid.innerHTML = emojis.map(e => `<button class="emoji-pick-item" data-emoji="${e}">${emojiImg(e, 'picker-emoji-img')}</button>`).join('');
     grid.querySelectorAll('button').forEach(btn => {
         btn.addEventListener('click', () => {
             callback(btn.dataset.emoji);
@@ -460,7 +506,7 @@ function renderChildSelector() {
     container.innerHTML = state.children.map(child => `
         <button class="child-tab ${child.id === state.currentChildId ? 'active' : ''}"
                 data-id="${child.id}" style="border-color: ${child.id === state.currentChildId ? child.color : 'transparent'}">
-            ${child.emoji} ${child.name}
+            ${emojiImg(child.emoji, 'assign-emoji-img')} ${child.name}
         </button>
     `).join('');
 
@@ -503,55 +549,62 @@ async function renderChores(main) {
     choreFirstRender = false;
 
     const childChores = getChoresForChild(state.currentChildId);
+
+    if (childChores.length === 0) {
+        main.innerHTML = `<div class="empty-state"><div class="emoji">${emojiImg('📝', 'item-emoji-img')}</div><p>No chores yet! Add some in Settings.</p></div>`;
+        return;
+    }
+
+
     let cards = childChores.map((chore, i) => {
         const count = completionCounts.get(chore.id) || 0;
         const done = count > 0;
 
         if (chore.recurring) {
-            // Recurring chores: always show the Done button, plus a count badge
             return `
             <div class="chore-card ${animate ? 'slide-up' : ''} ${done ? 'recurring-done' : ''}"
                  ${animate ? `style="animation-delay: ${i * 0.04}s"` : ''}
                  data-chore-id="${chore.id}">
-                <div class="chore-emoji">${chore.emoji}</div>
-                <div class="chore-info">
-                    <div class="chore-name">${chore.name} <span class="recurring-badge">🔁</span></div>
+                <div class="chore-img-banner">${emojiImg(chore.emoji, 'chore-img')}</div>
+                <div class="chore-card-content">
+                    <div class="chore-body">
+                        <div class="chore-name">${chore.name} <img class="recurring-badge-img" src="${emojiToImgUrl('🔁')}" alt="🔁"></div>
+                        <div class="chore-meta">
+                            <span class="chore-points">${emojiImg('⭐', 'recurring-badge-img')} ${chore.points}</span>
+                            <span class="chore-freq">${chore.frequency}</span>
+                        </div>
+                    </div>
+                    <div class="chore-footer">
+                        ${count > 0 ? `<span class="completion-count">x${count}</span>` : '<span></span>'}
+                        <button class="chore-done-btn" data-chore-id="${chore.id}">Done!</button>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        return `
+        <div class="chore-card ${animate ? 'slide-up' : ''} ${done ? 'completed' : ''}"
+             ${animate ? `style="animation-delay: ${i * 0.04}s"` : ''}
+             data-chore-id="${chore.id}">
+            <div class="chore-img-banner">${emojiImg(chore.emoji, 'chore-img')}</div>
+            <div class="chore-card-content">
+                <div class="chore-body">
+                    <div class="chore-name">${chore.name}</div>
                     <div class="chore-meta">
                         <span class="chore-points">⭐ ${chore.points}</span>
                         <span class="chore-freq">${chore.frequency}</span>
                     </div>
                 </div>
-                <div class="chore-actions">
-                    ${count > 0 ? `<span class="completion-count">x${count}</span>` : ''}
-                    <button class="chore-done-btn" data-chore-id="${chore.id}">Done!</button>
-                </div>
-            </div>`;
-        }
-
-        // Non-recurring: original behavior
-        return `
-        <div class="chore-card ${animate ? 'slide-up' : ''} ${done ? 'completed' : ''}"
-             ${animate ? `style="animation-delay: ${i * 0.04}s"` : ''}
-             data-chore-id="${chore.id}">
-            <div class="chore-emoji">${chore.emoji}</div>
-            <div class="chore-info">
-                <div class="chore-name">${chore.name}</div>
-                <div class="chore-meta">
-                    <span class="chore-points">⭐ ${chore.points}</span>
-                    <span class="chore-freq">${chore.frequency}</span>
+                <div class="chore-footer">
+                    <span></span>
+                    ${done
+                        ? `<span class="chore-check">${emojiImg('✅', 'assign-emoji-img')}</span>`
+                        : `<button class="chore-done-btn" data-chore-id="${chore.id}">Done!</button>`
+                    }
                 </div>
             </div>
-            ${done
-                ? '<span class="chore-check">✅</span>'
-                : `<button class="chore-done-btn" data-chore-id="${chore.id}">Done!</button>`
-            }
         </div>`;
     }).join('');
-
-    if (childChores.length === 0) {
-        main.innerHTML = `<div class="empty-state"><div class="emoji">📝</div><p>No chores yet! Add some in Settings.</p></div>`;
-        return;
-    }
 
     const dateNav = `
         <div class="chores-date-nav">
@@ -561,7 +614,13 @@ async function renderChores(main) {
             ${!isToday ? '<button class="date-today-btn" id="chores-go-today">Today</button>' : ''}
         </div>`;
 
-    main.innerHTML = `${dateNav}<div class="chores-grid">${cards}</div>`;
+    const missionTitle = `
+        <div class="section-title-row">
+            <h3>Daily Missions</h3>
+            <div class="title-line"></div>
+        </div>`;
+
+    main.innerHTML = `${dateNav}${missionTitle}<div class="chores-grid">${cards}</div>`;
 
     // Date navigation
     document.getElementById('chores-prev-day').addEventListener('click', () => {
@@ -639,6 +698,23 @@ async function renderChores(main) {
 // Calendar Tab
 // ============================================
 
+function computeStreak(completionsByDate, today) {
+    let streak = 0;
+    const d = new Date(today);
+    for (let i = 0; i < 365; i++) {
+        const key = ds(d);
+        if (completionsByDate[key] && completionsByDate[key].length > 0) {
+            streak++;
+        } else if (i > 0) {
+            break; // gap — stop (skip today if no completions yet)
+        } else if (i === 0 && (!completionsByDate[key] || completionsByDate[key].length === 0)) {
+            // today has no completions yet — check yesterday
+        }
+        d.setDate(d.getDate() - 1);
+    }
+    return streak;
+}
+
 async function renderCalendar(main) {
     const d = state.calendarDate;
     const year = d.getFullYear();
@@ -674,9 +750,30 @@ async function renderCalendar(main) {
         redemptionsByDate[dateKey].push(r);
     });
 
+    // Compute streak: count consecutive days (ending today) with at least one completion
+    const streakDays = computeStreak(completionsByDate, today);
+    const monthDone = completions.length;
+    const monthStars = completions.reduce((s, c) => s + (c.chore_points || 0), 0);
+
     const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-    let calendarHTML = `
+    const summaryHTML = `
+    <div class="history-summary-grid">
+        <div class="streak-card">
+            <div class="card-label">${emojiImg('🔥', 'assign-emoji-img')} Current Streak</div>
+            <div class="streak-count">${streakDays}<span class="streak-unit">Days!</span></div>
+            <div class="streak-msg">Don't break the chain! ${emojiImg('🚀', 'assign-emoji-img')}</div>
+        </div>
+        <div class="month-summary-card">
+            <div class="card-label">Month Summary</div>
+            <div class="month-stats-grid">
+                <div class="month-stat"><div class="val">${monthDone}</div><div class="lbl">Done</div></div>
+                <div class="month-stat"><div class="val">${monthStars}${emojiImg('⭐', 'recurring-badge-img')}</div><div class="lbl">Stars</div></div>
+            </div>
+        </div>
+    </div>`;
+
+    let calendarHTML = summaryHTML + `
         <div class="calendar-header">
             <button class="calendar-nav-btn" id="cal-prev">◀</button>
             <span class="calendar-title">${monthName}</span>
@@ -696,15 +793,15 @@ async function renderCalendar(main) {
         const isSelected = dateStr === state.selectedDate;
         const dayCompletions = completionsByDate[dateStr] || [];
         const dayRedemptions = redemptionsByDate[dateStr] || [];
-        const choreDots = dayCompletions.slice(0, 3).map(c => c.chore_emoji).join('');
-        const rewardDots = dayRedemptions.slice(0, 1).map(r => r.reward_emoji).join('');
+        const choreDots = dayCompletions.slice(0, 3).map(c => emojiImg(c.chore_emoji, 'day-dot-img')).join('');
+        const rewardDots = dayRedemptions.slice(0, 1).map(r => emojiImg(r.reward_emoji, 'day-dot-img')).join('');
         const dots = choreDots + rewardDots;
 
         calendarHTML += `
             <div class="calendar-day ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}"
                  data-date="${dateStr}">
                 <span class="day-number">${day}</span>
-                ${dots ? `<span class="day-dots">${dots}</span>` : ''}
+                ${dots ? `<div class="day-dots">${dots}</div>` : ''}
             </div>`;
     }
 
@@ -725,15 +822,15 @@ async function renderCalendar(main) {
                 calendarHTML += `
                     <div class="day-detail day-detail-chores">
                         <div class="day-detail-section-header">
-                            <span class="day-detail-section-icon">✅</span>
+                            <span class="day-detail-section-icon">${emojiImg('✅', 'item-emoji-img')}</span>
                             <span class="day-detail-section-label">Chores Completed</span>
-                            <span class="day-detail-section-stat chore-stat">+${chorePoints}⭐</span>
+                            <span class="day-detail-section-stat chore-stat">+${chorePoints}${emojiImg('⭐', 'recurring-badge-img')}</span>
                         </div>
                         ${dayChores.map(c => `
                             <div class="day-detail-item">
-                                <span class="emoji">${c.chore_emoji}</span>
+                                                ${emojiImg(c.chore_emoji, 'item-emoji-img')}
                                 <span class="name">${c.chore_name}</span>
-                                <span class="pts">+${c.chore_points}⭐</span>
+                                <span class="pts">+${c.chore_points}${emojiImg('⭐', 'recurring-badge-img')}</span>
                                 <button class="undo-btn" data-completion-id="${c.id}">Undo</button>
                             </div>
                         `).join('')}
@@ -745,15 +842,15 @@ async function renderCalendar(main) {
                 calendarHTML += `
                     <div class="day-detail day-detail-rewards">
                         <div class="day-detail-section-header">
-                            <span class="day-detail-section-icon">🎁</span>
+                            <span class="day-detail-section-icon">${emojiImg('🎁', 'item-emoji-img')}</span>
                             <span class="day-detail-section-label">Rewards Claimed</span>
-                            <span class="day-detail-section-stat reward-stat">-${rewardPoints}⭐</span>
+                            <span class="day-detail-section-stat reward-stat">-${rewardPoints}${emojiImg('⭐', 'recurring-badge-img')}</span>
                         </div>
                         ${dayRewards.map(r => `
                             <div class="day-detail-item reward-detail-item">
-                                <span class="emoji">${r.reward_emoji}</span>
+                                ${emojiImg(r.reward_emoji, 'item-emoji-img')}
                                 <span class="name">${r.reward_name}</span>
-                                <span class="pts reward-cost">-${r.points_cost}⭐</span>
+                                <span class="pts reward-cost">-${r.points_cost}${emojiImg('⭐', 'recurring-badge-img')}</span>
                                 <button class="undo-btn" data-redemption-id="${r.id}">Undo</button>
                             </div>
                         `).join('')}
@@ -828,14 +925,14 @@ async function renderRewardsTab(main) {
 
         html += `
         <div class="rewards-overview">
-            <h3>🏆 Claimed Today</h3>
+            <h3>${emojiImg('🏆', 'assign-emoji-img')} Claimed Today</h3>
             <div class="rewards-overview-stats">
                 <div class="overview-stat">
                     <div class="stat-value">${todayRedemptions.length}</div>
                     <div class="stat-label">Claimed</div>
                 </div>
                 <div class="overview-stat">
-                    <div class="stat-value">${todaySpent}⭐</div>
+                    <div class="stat-value">${todaySpent}${emojiImg('⭐', 'recurring-badge-img')}</div>
                     <div class="stat-label">Spent Today</div>
                 </div>
             </div>`;
@@ -843,9 +940,9 @@ async function renderRewardsTab(main) {
         todayRedemptions.forEach(r => {
             html += `
             <div class="redemption-item">
-                <span class="emoji">${r.reward_emoji}</span>
+                ${emojiImg(r.reward_emoji, 'item-emoji-img')}
                 <span class="name">${r.reward_name}</span>
-                <span class="cost">-${r.points_cost}⭐</span>
+                <span class="cost">-${r.points_cost}${emojiImg('⭐', 'recurring-badge-img')}</span>
                 <button class="undo-redemption-btn" data-redemption-id="${r.id}" title="Remove">✕</button>
             </div>`;
         });
@@ -854,31 +951,42 @@ async function renderRewardsTab(main) {
 
     // Available rewards grid
     const childRewards = getRewardsForChild(state.currentChildId);
-    html += '<div class="section-title">Available Rewards</div><div class="rewards-grid">';
-
-    childRewards.forEach(reward => {
-        const pct = Math.min(100, (state.points / reward.points_cost) * 100);
-        const canClaim = state.points >= reward.points_cost;
-        const freqLabel = { continuous: '', daily: '1/day', weekly: '1/week' }[reward.claim_frequency || 'continuous'];
-
-        html += `
-        <div class="reward-card bounce-in">
-            <div class="reward-emoji">${reward.emoji}</div>
-            <div class="reward-name">${reward.name}</div>
-            <div class="reward-cost">⭐ ${reward.points_cost} pts${freqLabel ? ` · ${freqLabel}` : ''}</div>
-            <div class="reward-progress">
-                <div class="reward-progress-bar" style="width: ${pct}%"></div>
-            </div>
-            <button class="reward-claim-btn" data-reward-id="${reward.id}" ${canClaim ? '' : 'disabled'}>
-                ${canClaim ? 'Claim!' : `Need ${reward.points_cost - state.points} more`}
-            </button>
-        </div>`;
-    });
-
-    html += '</div>';
 
     if (childRewards.length === 0) {
-        html = `<div class="empty-state"><div class="emoji">🎁</div><p>No rewards yet! Add some in Settings.</p></div>`;
+        html = `<div class="empty-state"><div class="emoji">${emojiImg('🎁', 'item-emoji-img')}</div><p>No prizes yet! Add some in Settings.</p></div>`;
+    } else {
+        html += `
+        <div class="section-title-row">
+            <h3>Available Prizes</h3>
+            <div class="title-line"></div>
+        </div>
+        <div class="rewards-grid">`;
+
+        childRewards.forEach((reward, i) => {
+            const pct = Math.min(100, (state.points / reward.points_cost) * 100);
+            const canClaim = state.points >= reward.points_cost;
+            const freqLabel = { continuous: '', daily: '· 1/day', weekly: '· 1/week' }[reward.claim_frequency || 'continuous'];
+
+            html += `
+            <div class="reward-card bounce-in" style="animation-delay: ${i * 0.05}s">
+                <div class="reward-price-tag">
+                    <span class="price-num">${reward.points_cost}</span>
+                    <span class="price-label">Stars${freqLabel ? ' ' + freqLabel : ''}</span>
+                </div>
+                <div class="reward-emoji-banner">
+                    ${emojiImg(reward.emoji, 'reward-emoji')}
+                </div>
+                <div class="reward-name">${reward.name}</div>
+                <div class="reward-progress">
+                    <div class="reward-progress-bar" style="width: ${pct}%"></div>
+                </div>
+                <button class="reward-claim-btn" data-reward-id="${reward.id}" ${canClaim ? '' : 'disabled'}>
+                    ${canClaim ? `${emojiImg('🎉', 'assign-emoji-img')} Get It Now!` : `Need ${reward.points_cost - state.points} more ${emojiImg('⭐', 'assign-emoji-img')}`}
+                </button>
+            </div>`;
+        });
+
+        html += '</div>';
     }
 
     main.innerHTML = html;
@@ -954,7 +1062,7 @@ function renderPrintTab(main) {
                 </select>
             </label>
         </div>
-        <button class="print-btn" id="do-print">🖨️ Print Chart</button>
+        <button class="print-btn" id="do-print">${emojiImg('🖨️', 'assign-emoji-img')} Print Chart</button>
         <div id="chart-preview"></div>
     </div>`;
 
@@ -974,7 +1082,7 @@ function renderChartPreview() {
     const weekStart = document.getElementById('print-week').value;
     const filter = document.getElementById('print-filter').value;
     const child = state.children.find(c => c.id === childId);
-    const childName = child ? `${child.emoji} ${child.name}` : 'Child';
+    const childName = child ? `${emojiImg(child.emoji, 'cell-emoji-img')} ${child.name}` : 'Child';
 
     let chores = getChoresForChild(childId);
     if (filter !== 'all') chores = chores.filter(c => c.frequency === filter);
@@ -995,7 +1103,7 @@ function renderChartPreview() {
 
     let table = `
     <div class="chore-chart">
-        <h2>⭐ Chore Chart ⭐</h2>
+        <h2>${emojiImg('⭐', 'cell-emoji-img')} Chore Chart ${emojiImg('⭐', 'cell-emoji-img')}</h2>
         <div class="chart-subtitle">${subtitle}</div>
         <table>
             <thead>
@@ -1007,7 +1115,7 @@ function renderChartPreview() {
             </thead>
             <tbody>
                 ${chores.map(chore => `<tr>
-                    <td class="chore-cell"><span class="cell-emoji">${chore.emoji}</span>${chore.name}</td>
+                    <td class="chore-cell">${emojiImg(chore.emoji, 'cell-emoji-img')}${chore.name}</td>
                     ${days.map(() => `<td class="check-cell"><span class="check-box"></span></td>`).join('')}
                     <td class="pts-cell">${chore.points}</td>
                 </tr>`).join('')}
@@ -1048,12 +1156,12 @@ function renderSettings(main) {
     // --- Children Section ---
     html += `
     <div class="settings-section">
-        <h3>👶 Children</h3>
+        <h3>${emojiImg('👶', 'assign-emoji-img')} Children</h3>
         <ul class="settings-list" id="children-list">
             ${state.children.map(c => {
                 if (editingChildId === c.id) {
                     return `<li class="edit-inline-form" data-edit-id="${c.id}">
-                        <button class="emoji-pick-btn edit-emoji-btn" data-category="child" data-emoji="${c.emoji}">${c.emoji}</button>
+                        <button class="emoji-pick-btn edit-emoji-btn" data-category="child" data-emoji="${c.emoji}">${emojiImg(c.emoji, 'pick-btn-img')}</button>
                         <input type="hidden" class="edit-emoji-val" value="${c.emoji}">
                         <input type="text" class="edit-name" value="${c.name}" maxlength="20">
                         <input type="color" class="edit-color" value="${c.color}">
@@ -1079,7 +1187,7 @@ function renderSettings(main) {
                                 <label class="assign-item">
                                     <input type="checkbox" data-type="chore" data-child-id="${c.id}" data-item-id="${ch.id}"
                                         ${assignedChores.includes(ch.id) ? 'checked' : ''}>
-                                    <span class="assign-emoji">${ch.emoji}</span>
+                                    ${emojiImg(ch.emoji, 'assign-emoji-img')}
                                     <span class="assign-name">${ch.name}</span>
                                 </label>
                             `).join('')}
@@ -1096,7 +1204,7 @@ function renderSettings(main) {
                                 <label class="assign-item">
                                     <input type="checkbox" data-type="reward" data-child-id="${c.id}" data-item-id="${rw.id}"
                                         ${assignedRewards.includes(rw.id) ? 'checked' : ''}>
-                                    <span class="assign-emoji">${rw.emoji}</span>
+                                    ${emojiImg(rw.emoji, 'assign-emoji-img')}
                                     <span class="assign-name">${rw.name}</span>
                                 </label>
                             `).join('')}
@@ -1104,7 +1212,7 @@ function renderSettings(main) {
                     </div>`;
                 }
                 return `<li>
-                    <span class="item-emoji">${c.emoji}</span>
+                    ${emojiImg(c.emoji, 'item-emoji-img')}
                     <span class="item-name">${c.name}</span>
                     <span class="item-color" style="background: ${c.color}"></span>
                     <button class="assign-btn ${assigningChildId === c.id ? 'active' : ''}" data-assign="child" data-id="${c.id}" title="Assign chores & rewards">📋</button>
@@ -1115,22 +1223,20 @@ function renderSettings(main) {
         </ul>
         <div class="add-form">
             <input type="text" placeholder="Name" id="add-child-name" maxlength="20">
-            <button class="emoji-pick-btn" id="add-child-emoji-btn" data-emoji="🌟">🌟</button>
+            <button class="emoji-pick-btn" id="add-child-emoji-btn" data-emoji="🌟">${emojiImg('🌟', 'pick-btn-img')}</button>
             <input type="hidden" id="add-child-emoji" value="🌟">
             <input type="color" id="add-child-color" value="#FFB347">
             <button class="add-btn" id="add-child-btn">+ Add</button>
         </div>
     </div>`;
 
-    // --- Chores Section ---
-    html += `
-    <div class="settings-section">
-        <h3>✅ Chores</h3>
+    // --- Chores / Jobs Toggle Section ---
+    const choresContent = `
         <ul class="settings-list">
             ${state.chores.map(c => {
                 if (editingChoreId === c.id) {
                     return `<li class="edit-inline-form" data-edit-id="${c.id}">
-                        <button class="emoji-pick-btn edit-emoji-btn" data-category="chore" data-emoji="${c.emoji}">${c.emoji}</button>
+                        <button class="emoji-pick-btn edit-emoji-btn" data-category="chore" data-emoji="${c.emoji}">${emojiImg(c.emoji, 'pick-btn-img')}</button>
                         <input type="hidden" class="edit-emoji-val" value="${c.emoji}">
                         <input type="text" class="edit-name" value="${c.name}" maxlength="30">
                         <input type="number" class="edit-points" value="${c.points}" min="1" max="100">
@@ -1141,15 +1247,15 @@ function renderSettings(main) {
                             <option value="monthly" ${c.frequency === 'monthly' ? 'selected' : ''}>Monthly</option>
                             <option value="once" ${c.frequency === 'once' ? 'selected' : ''}>Once</option>
                         </select>
-                        <label class="toggle-label"><input type="checkbox" class="edit-recurring" ${c.recurring ? 'checked' : ''}> 🔁</label>
+                        <label class="toggle-label"><input type="checkbox" class="edit-recurring" ${c.recurring ? 'checked' : ''}> ${emojiImg('🔁', 'recurring-badge-img')}</label>
                         <button class="save-btn" data-save="chore" data-id="${c.id}">Save</button>
                         <button class="cancel-edit-btn" data-cancel="chore">Cancel</button>
                     </li>`;
                 }
                 return `<li>
-                    <span class="item-emoji">${c.emoji}</span>
+                    ${emojiImg(c.emoji, 'item-emoji-img')}
                     <span class="item-name">${c.name}</span>
-                    <span class="item-detail">${c.points}⭐ · ${c.frequency}${c.recurring ? ' · 🔁' : ''}</span>
+                    <span class="item-detail">${c.points}${emojiImg('⭐', 'recurring-badge-img')} · ${c.frequency}${c.recurring ? ` · ${emojiImg('🔁', 'recurring-badge-img')}` : ''}</span>
                     <button class="edit-btn" data-edit="chore" data-id="${c.id}" title="Edit">${SVG_EDIT}</button>
                     <button class="delete-btn" data-delete="chore" data-id="${c.id}" title="Remove">✕</button>
                 </li>`;
@@ -1157,7 +1263,7 @@ function renderSettings(main) {
         </ul>
         <div class="add-form">
             <input type="text" placeholder="Chore name" id="add-chore-name" maxlength="30">
-            <button class="emoji-pick-btn" id="add-chore-emoji-btn" data-emoji="✅">✅</button>
+            <button class="emoji-pick-btn" id="add-chore-emoji-btn" data-emoji="✅">${emojiImg('✅', 'pick-btn-img')}</button>
             <input type="hidden" id="add-chore-emoji" value="✅">
             <input type="number" placeholder="Pts" id="add-chore-points" value="5" min="1" max="100">
             <select id="add-chore-freq">
@@ -1167,21 +1273,17 @@ function renderSettings(main) {
                 <option value="monthly">Monthly</option>
                 <option value="once">Once</option>
             </select>
-            <label class="toggle-label"><input type="checkbox" id="add-chore-recurring"> 🔁</label>
+            <label class="toggle-label"><input type="checkbox" id="add-chore-recurring"> ${emojiImg('🔁', 'recurring-badge-img')}</label>
             <button class="add-btn" id="add-chore-btn">+ Add</button>
-        </div>
-    </div>`;
+        </div>`;
 
-    // --- Rewards Section ---
-    html += `
-    <div class="settings-section">
-        <h3>🎁 Rewards</h3>
+    const jobsContent = `
         <ul class="settings-list">
             ${state.rewards.map(r => {
-                const claimFreqLabel = { continuous: '', daily: '📅 1/day', weekly: '📅 1/week' }[r.claim_frequency || 'continuous'];
+                const claimFreqLabel = { continuous: '', daily: `${emojiImg('📅', 'recurring-badge-img')} 1/day`, weekly: `${emojiImg('📅', 'recurring-badge-img')} 1/week` }[r.claim_frequency || 'continuous'];
                 if (editingRewardId === r.id) {
                     return `<li class="edit-inline-form" data-edit-id="${r.id}">
-                        <button class="emoji-pick-btn edit-emoji-btn" data-category="reward" data-emoji="${r.emoji}">${r.emoji}</button>
+                        <button class="emoji-pick-btn edit-emoji-btn" data-category="reward" data-emoji="${r.emoji}">${emojiImg(r.emoji, 'pick-btn-img')}</button>
                         <input type="hidden" class="edit-emoji-val" value="${r.emoji}">
                         <input type="text" class="edit-name" value="${r.name}" maxlength="30">
                         <input type="number" class="edit-cost" value="${r.points_cost}" min="1" max="1000">
@@ -1195,17 +1297,17 @@ function renderSettings(main) {
                     </li>`;
                 }
                 return `<li>
-                    <span class="item-emoji">${r.emoji}</span>
+                    ${emojiImg(r.emoji, 'item-emoji-img')}
                     <span class="item-name">${r.name}</span>
-                    <span class="item-detail">${r.points_cost}⭐${claimFreqLabel ? ' · ' + claimFreqLabel : ''}</span>
+                    <span class="item-detail">${r.points_cost}${emojiImg('⭐', 'recurring-badge-img')}${claimFreqLabel ? ' · ' + claimFreqLabel : ''}</span>
                     <button class="edit-btn" data-edit="reward" data-id="${r.id}" title="Edit">${SVG_EDIT}</button>
                     <button class="delete-btn" data-delete="reward" data-id="${r.id}" title="Remove">✕</button>
                 </li>`;
             }).join('')}
         </ul>
         <div class="add-form">
-            <input type="text" placeholder="Reward name" id="add-reward-name" maxlength="30">
-            <button class="emoji-pick-btn" id="add-reward-emoji-btn" data-emoji="🎁">🎁</button>
+            <input type="text" placeholder="Prize name" id="add-reward-name" maxlength="30">
+            <button class="emoji-pick-btn" id="add-reward-emoji-btn" data-emoji="🎁">${emojiImg('🎁', 'pick-btn-img')}</button>
             <input type="hidden" id="add-reward-emoji" value="🎁">
             <input type="number" placeholder="Cost" id="add-reward-cost" value="25" min="1" max="1000">
             <select id="add-reward-claim-freq">
@@ -1214,16 +1316,34 @@ function renderSettings(main) {
                 <option value="weekly">Once/week</option>
             </select>
             <button class="add-btn" id="add-reward-btn">+ Add</button>
+        </div>`;
+
+    html += `
+    <div class="settings-section settings-tabbed ${settingsContentTab === 'chores' ? 'tab-chores' : 'tab-jobs'}">
+        <div class="settings-toggle-wrap">
+            <div class="settings-toggle">
+                <button class="toggle-pill ${settingsContentTab === 'chores' ? 'active' : ''}" data-settings-tab="chores">
+                    ${emojiImg('✅', 'assign-emoji-img')} Chores
+                    <span class="settings-tab-count">${state.chores.length}</span>
+                </button>
+                <button class="toggle-pill ${settingsContentTab === 'jobs' ? 'active' : ''}" data-settings-tab="jobs">
+                    ${emojiImg('🎁', 'assign-emoji-img')} Prizes
+                    <span class="settings-tab-count">${state.rewards.length}</span>
+                </button>
+            </div>
+        </div>
+        <div class="settings-tab-content">
+            ${settingsContentTab === 'chores' ? choresContent : jobsContent}
         </div>
     </div>`;
 
     // --- Data Section ---
     html += `
     <div class="settings-section">
-        <h3>💾 Data</h3>
+        <h3>${emojiImg('💾', 'assign-emoji-img')} Data</h3>
         <div class="data-actions">
-            <button class="export-btn" id="export-db-btn">📥 Export Database</button>
-            <label class="import-btn" for="import-db-input">📤 Import Database</label>
+            <button class="export-btn" id="export-db-btn">${emojiImg('📥', 'assign-emoji-img')} Export Database</button>
+            <label class="import-btn" for="import-db-input">${emojiImg('📤', 'assign-emoji-img')} Import Database</label>
             <input type="file" id="import-db-input" accept=".json" style="display:none">
         </div>
         <p class="data-hint">Export saves all children, chores, rewards and history as a JSON file. Import replaces all current data.</p>
@@ -1233,7 +1353,7 @@ function renderSettings(main) {
     // --- User Management Section ---
     html += `
     <div class="settings-section">
-        <h3>🔑 User Management</h3>
+        <h3>${emojiImg('🔑', 'assign-emoji-img')} User Management</h3>
         <div id="users-list"></div>
         <div class="add-form">
             <input type="text" placeholder="Username" id="add-user-name" maxlength="30">
@@ -1257,7 +1377,7 @@ function bindSettingsEvents(main) {
             const li = btn.closest('li');
             openEmojiPicker(emojiSets[cat], (emoji) => {
                 li.querySelector('.edit-emoji-val').value = emoji;
-                btn.textContent = emoji;
+                btn.innerHTML = emojiImg(emoji, 'pick-btn-img');
                 btn.dataset.emoji = emoji;
             });
         });
@@ -1295,6 +1415,16 @@ function bindSettingsEvents(main) {
                 await loadRewards();
                 await loadPoints();
             }
+            renderSettings(main);
+        });
+    });
+
+    // --- Settings sub-tab toggle ---
+    main.querySelectorAll('[data-settings-tab]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            settingsContentTab = btn.dataset.settingsTab;
+            editingChoreId = null;
+            editingRewardId = null;
             renderSettings(main);
         });
     });
@@ -1392,19 +1522,19 @@ function bindSettingsEvents(main) {
     document.getElementById('add-child-emoji-btn').addEventListener('click', () => {
         openEmojiPicker(CHILD_EMOJIS, (emoji) => {
             document.getElementById('add-child-emoji').value = emoji;
-            document.getElementById('add-child-emoji-btn').textContent = emoji;
+            document.getElementById('add-child-emoji-btn').innerHTML = emojiImg(emoji, 'pick-btn-img');
         });
     });
-    document.getElementById('add-chore-emoji-btn').addEventListener('click', () => {
+    document.getElementById('add-chore-emoji-btn')?.addEventListener('click', () => {
         openEmojiPicker(CHORE_EMOJIS, (emoji) => {
             document.getElementById('add-chore-emoji').value = emoji;
-            document.getElementById('add-chore-emoji-btn').textContent = emoji;
+            document.getElementById('add-chore-emoji-btn').innerHTML = emojiImg(emoji, 'pick-btn-img');
         });
     });
-    document.getElementById('add-reward-emoji-btn').addEventListener('click', () => {
+    document.getElementById('add-reward-emoji-btn')?.addEventListener('click', () => {
         openEmojiPicker(REWARD_EMOJIS, (emoji) => {
             document.getElementById('add-reward-emoji').value = emoji;
-            document.getElementById('add-reward-emoji-btn').textContent = emoji;
+            document.getElementById('add-reward-emoji-btn').innerHTML = emojiImg(emoji, 'pick-btn-img');
         });
     });
 
@@ -1426,7 +1556,7 @@ function bindSettingsEvents(main) {
         renderSettings(main);
     });
 
-    document.getElementById('add-chore-btn').addEventListener('click', async () => {
+    document.getElementById('add-chore-btn')?.addEventListener('click', async () => {
         const name = document.getElementById('add-chore-name').value.trim();
         if (!name) return;
         await API.post('/api/chores', {
@@ -1440,7 +1570,7 @@ function bindSettingsEvents(main) {
         renderSettings(main);
     });
 
-    document.getElementById('add-reward-btn').addEventListener('click', async () => {
+    document.getElementById('add-reward-btn')?.addEventListener('click', async () => {
         const name = document.getElementById('add-reward-name').value.trim();
         if (!name) return;
         await API.post('/api/rewards', {
@@ -1460,7 +1590,8 @@ function bindSettingsEvents(main) {
             const id = parseInt(btn.dataset.id);
 
             if (type === 'child') {
-                if (!confirm('Remove this child? Their history will be deleted.')) return;
+                const ok = await showConfirm({ icon: '👶', title: 'Remove Child?', message: 'Their history will also be deleted.', okLabel: 'Remove' });
+                if (!ok) return;
                 await API.del(`/api/children/${id}`);
                 await loadChildren();
                 if (state.currentChildId === id) {
@@ -1469,12 +1600,14 @@ function bindSettingsEvents(main) {
                 }
                 renderChildSelector();
             } else if (type === 'chore') {
-                if (!confirm('Remove this chore?')) return;
+                const ok = await showConfirm({ icon: '🗑️', title: 'Remove Chore?', message: 'This chore will be permanently deleted.', okLabel: 'Remove' });
+                if (!ok) return;
                 await API.del(`/api/chores/${id}`);
                 await loadChores();
                 await loadPoints();
             } else if (type === 'reward') {
-                if (!confirm('Remove this reward?')) return;
+                const ok = await showConfirm({ icon: '🗑️', title: 'Remove Prize?', message: 'This prize will be permanently deleted.', okLabel: 'Remove' });
+                if (!ok) return;
                 await API.del(`/api/rewards/${id}`);
                 await loadRewards();
                 await loadPoints();
@@ -1498,7 +1631,8 @@ function bindSettingsEvents(main) {
     document.getElementById('import-db-input').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        if (!confirm('This will replace ALL current data with the imported file. Are you sure?')) {
+        const okImport = await showConfirm({ icon: '📤', title: 'Replace All Data?', message: 'This will overwrite all children, chores, rewards and history.', okLabel: 'Import' });
+        if (!okImport) {
             e.target.value = '';
             return;
         }
@@ -1586,7 +1720,8 @@ async function loadUsersList() {
 
     container.querySelectorAll('[data-delete-user]').forEach(btn => {
         btn.addEventListener('click', async () => {
-            if (!confirm('Delete this user?')) return;
+            const okUser = await showConfirm({ icon: '🔑', title: 'Delete User?', message: 'This user account will be permanently removed.', okLabel: 'Delete' });
+            if (!okUser) return;
             const result = await API.del(`/api/users/${btn.dataset.deleteUser}`);
             if (result.error) {
                 showToast(result.error, 'error');
@@ -1607,7 +1742,7 @@ function launchConfetti() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    const colors = ['#FF6B9D', '#FFB347', '#FFD700', '#7ED957', '#4ECDC4', '#A78BFA', '#FF6B6B'];
+    const colors = ['#00cbfe', '#ffd709', '#59ee50', '#3b82f6', '#fb5151', '#ffffff', '#000000'];
     const particles = [];
 
     for (let i = 0; i < 80; i++) {
