@@ -124,6 +124,38 @@ function ds(d) {
 
 const SVG_EDIT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></svg>`;
 
+const SVG_GRIP = `<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="12" r="1.8"/><circle cx="9" cy="18" r="1.8"/><circle cx="15" cy="18" r="1.8"/></svg>`;
+
+// ============================================
+// Chore sorting
+// ============================================
+
+const FREQ_RANK = { daily: 0, weekly: 1, 'bi-weekly': 2, monthly: 3, once: 4 };
+
+// `cmp: null` means "leave the server order alone" — that is the manual
+// priority order stored in chores.sort_order.
+const CHORE_SORTS = {
+    priority:      { label: 'Priority',   emoji: '\ud83d\udccc', cmp: null },
+    'points-desc': { label: 'Most pts',   emoji: '\u2b50', cmp: (a, b) => b.points - a.points },
+    'points-asc':  { label: 'Fewest pts', emoji: '\ud83e\udeb6', cmp: (a, b) => a.points - b.points },
+    'name-asc':    { label: 'A \u2013 Z',      emoji: '\ud83d\udd24', cmp: (a, b) => a.name.localeCompare(b.name) },
+    frequency:     { label: 'How often',  emoji: '\ud83d\udcc5', cmp: (a, b) => (FREQ_RANK[a.frequency] ?? 9) - (FREQ_RANK[b.frequency] ?? 9) },
+};
+
+const DEFAULT_CHORE_SORT = 'priority';
+
+function loadChoreSort() {
+    const saved = localStorage.getItem('choreSort');
+    return CHORE_SORTS[saved] ? saved : DEFAULT_CHORE_SORT;
+}
+
+function sortChores(chores) {
+    const cmp = CHORE_SORTS[state.choreSort]?.cmp;
+    if (!cmp) return chores;
+    // Ties fall back to the manual priority order.
+    return [...chores].sort((a, b) => cmp(a, b) || (a.sort_order - b.sort_order) || (a.id - b.id));
+}
+
 // ============================================
 // State
 // ============================================
@@ -138,6 +170,7 @@ const state = {
     calendarDate: new Date(),
     selectedDate: null,
     activeDate: ds(new Date()),
+    choreSort: loadChoreSort(),
     auth: { authenticated: false, username: '', role: '' },
     childChores: {},   // childId -> [choreId, ...]
     childRewards: {},  // childId -> [rewardId, ...]
@@ -148,6 +181,8 @@ let editingChildId = null;
 let editingChoreId = null;
 let editingRewardId = null;
 let assigningChildId = null;
+let assigningChoreId = null;
+let assigningRewardId = null;
 let settingsContentTab = 'chores';
 
 // ============================================
@@ -230,6 +265,10 @@ async function loadChildAssignments(childId) {
     ]);
     state.childChores[childId] = chores.error ? [] : chores;
     state.childRewards[childId] = rewards.error ? [] : rewards;
+}
+
+async function loadAllChildAssignments() {
+    await Promise.all(state.children.map(c => loadChildAssignments(c.id)));
 }
 
 function getChoresForChild(childId) {
@@ -548,7 +587,7 @@ async function renderChores(main) {
     const animate = choreFirstRender;
     choreFirstRender = false;
 
-    const childChores = getChoresForChild(state.currentChildId);
+    const childChores = sortChores(getChoresForChild(state.currentChildId));
 
     if (childChores.length === 0) {
         main.innerHTML = `<div class="empty-state"><div class="emoji">${emojiImg('📝', 'item-emoji-img')}</div><p>No chores yet! Add some in Settings.</p></div>`;
@@ -614,13 +653,47 @@ async function renderChores(main) {
             ${!isToday ? '<button class="date-today-btn" id="chores-go-today">Today</button>' : ''}
         </div>`;
 
+    const sortBar = `
+        <div class="chore-sort-bar">
+            <span class="chore-sort-label">Sort</span>
+            <div class="chore-sort-pills">
+                ${Object.entries(CHORE_SORTS).map(([key, s]) => `
+                    <button class="chore-sort-pill ${state.choreSort === key ? 'active' : ''}" data-chore-sort="${key}">
+                        ${emojiImg(s.emoji, 'chore-sort-emoji')} ${s.label}
+                    </button>
+                `).join('')}
+            </div>
+        </div>`;
+
     const missionTitle = `
         <div class="section-title-row">
             <h3>Daily Missions</h3>
             <div class="title-line"></div>
         </div>`;
 
-    main.innerHTML = `${dateNav}${missionTitle}<div class="chores-grid">${cards}</div>`;
+    main.innerHTML = `${dateNav}${sortBar}${missionTitle}<div class="chores-grid">${cards}</div>`;
+
+    // Keep the chosen sort visible when the pills overflow on a narrow screen
+    const pillTrack = main.querySelector('.chore-sort-pills');
+    const activePill = main.querySelector('.chore-sort-pill.active');
+    if (pillTrack && activePill) {
+        const centerActivePill = () => {
+            pillTrack.scrollLeft = activePill.offsetLeft - (pillTrack.clientWidth - activePill.offsetWidth) / 2;
+        };
+        requestAnimationFrame(centerActivePill);
+        // The display webfont lands after first paint and widens the pills, so
+        // the first pass can run before the track actually overflows.
+        if (document.fonts) document.fonts.ready.then(centerActivePill);
+    }
+
+    main.querySelectorAll('[data-chore-sort]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (state.choreSort === btn.dataset.choreSort) return;
+            state.choreSort = btn.dataset.choreSort;
+            localStorage.setItem('choreSort', state.choreSort);
+            renderChores(main);
+        });
+    });
 
     // Date navigation
     document.getElementById('chores-prev-day').addEventListener('click', () => {
@@ -1232,7 +1305,8 @@ function renderSettings(main) {
 
     // --- Chores / Jobs Toggle Section ---
     const choresContent = `
-        <ul class="settings-list">
+        <p class="reorder-hint">Drag the handles to set the priority order kids see on the Chores tab.</p>
+        <ul class="settings-list" id="chores-settings-list">
             ${state.chores.map(c => {
                 if (editingChoreId === c.id) {
                     return `<li class="edit-inline-form" data-edit-id="${c.id}">
@@ -1252,13 +1326,35 @@ function renderSettings(main) {
                         <button class="cancel-edit-btn" data-cancel="chore">Cancel</button>
                     </li>`;
                 }
-                return `<li>
+                const choreAssignSection = assigningChoreId === c.id ? `
+                    <div class="assign-section" data-chore-assign-id="${c.id}">
+                        <div class="assign-header">
+                            <span>Assign to Children</span>
+                            <div class="assign-actions">
+                                <button class="assign-action-btn" data-select-all-for="chore" data-item-id="${c.id}">Select All</button>
+                                <button class="assign-action-btn" data-clear-all-for="chore" data-item-id="${c.id}">Clear All</button>
+                            </div>
+                        </div>
+                        <div class="assign-grid">
+                            ${state.children.map(child => `
+                                <label class="assign-item">
+                                    <input type="checkbox" data-assign-for="chore" data-child-id="${child.id}" data-item-id="${c.id}"
+                                        ${(state.childChores[child.id] || []).includes(c.id) ? 'checked' : ''}>
+                                    ${emojiImg(child.emoji, 'assign-emoji-img')}
+                                    <span class="assign-name">${child.name}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>` : '';
+                return `<li data-chore-row-id="${c.id}">
+                    <button class="drag-handle" title="Drag to reorder">${SVG_GRIP}</button>
                     ${emojiImg(c.emoji, 'item-emoji-img')}
                     <span class="item-name">${c.name}</span>
                     <span class="item-detail">${c.points}${emojiImg('⭐', 'recurring-badge-img')} · ${c.frequency}${c.recurring ? ` · ${emojiImg('🔁', 'recurring-badge-img')}` : ''}</span>
+                    <button class="assign-btn ${assigningChoreId === c.id ? 'active' : ''}" data-assign-item="chore" data-id="${c.id}" title="Assign to children">👥</button>
                     <button class="edit-btn" data-edit="chore" data-id="${c.id}" title="Edit">${SVG_EDIT}</button>
                     <button class="delete-btn" data-delete="chore" data-id="${c.id}" title="Remove">✕</button>
-                </li>`;
+                </li>${choreAssignSection}`;
             }).join('')}
         </ul>
         <div class="add-form">
@@ -1296,13 +1392,34 @@ function renderSettings(main) {
                         <button class="cancel-edit-btn" data-cancel="reward">Cancel</button>
                     </li>`;
                 }
+                const rewardAssignSection = assigningRewardId === r.id ? `
+                    <div class="assign-section" data-reward-assign-id="${r.id}">
+                        <div class="assign-header">
+                            <span>Assign to Children</span>
+                            <div class="assign-actions">
+                                <button class="assign-action-btn" data-select-all-for="reward" data-item-id="${r.id}">Select All</button>
+                                <button class="assign-action-btn" data-clear-all-for="reward" data-item-id="${r.id}">Clear All</button>
+                            </div>
+                        </div>
+                        <div class="assign-grid">
+                            ${state.children.map(child => `
+                                <label class="assign-item">
+                                    <input type="checkbox" data-assign-for="reward" data-child-id="${child.id}" data-item-id="${r.id}"
+                                        ${(state.childRewards[child.id] || []).includes(r.id) ? 'checked' : ''}>
+                                    ${emojiImg(child.emoji, 'assign-emoji-img')}
+                                    <span class="assign-name">${child.name}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>` : '';
                 return `<li>
                     ${emojiImg(r.emoji, 'item-emoji-img')}
                     <span class="item-name">${r.name}</span>
                     <span class="item-detail">${r.points_cost}${emojiImg('⭐', 'recurring-badge-img')}${claimFreqLabel ? ' · ' + claimFreqLabel : ''}</span>
+                    <button class="assign-btn ${assigningRewardId === r.id ? 'active' : ''}" data-assign-item="reward" data-id="${r.id}" title="Assign to children">👥</button>
                     <button class="edit-btn" data-edit="reward" data-id="${r.id}" title="Edit">${SVG_EDIT}</button>
                     <button class="delete-btn" data-delete="reward" data-id="${r.id}" title="Remove">✕</button>
-                </li>`;
+                </li>${rewardAssignSection}`;
             }).join('')}
         </ul>
         <div class="add-form">
@@ -1367,8 +1484,86 @@ function renderSettings(main) {
     loadUsersList();
 }
 
+// ============================================
+// Manual chore reordering (drag handles in Settings)
+// ============================================
+
+// A chore row is the <li> plus any assign panel rendered after it; they move
+// together so an open panel stays attached to its chore.
+function choreRowGroup(li) {
+    const nodes = [li];
+    let n = li.nextElementSibling;
+    while (n && n.tagName !== 'LI') {
+        nodes.push(n);
+        n = n.nextElementSibling;
+    }
+    return nodes;
+}
+
+function currentChoreOrder(list) {
+    return [...list.querySelectorAll('li[data-chore-row-id]')].map(li => parseInt(li.dataset.choreRowId));
+}
+
+function setupChoreReorder(main) {
+    const list = main.querySelector('#chores-settings-list');
+    if (!list) return;
+
+    list.querySelectorAll('.drag-handle').forEach(handle => {
+        handle.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            const li = handle.closest('li[data-chore-row-id]');
+            if (!li) return;
+
+            const orderBefore = currentChoreOrder(list);
+            li.classList.add('dragging');
+            handle.setPointerCapture(e.pointerId);
+
+            const onMove = (ev) => {
+                // Keep the page following the drag when it reaches an edge
+                const margin = 90;
+                if (ev.clientY < margin) window.scrollBy(0, -12);
+                else if (ev.clientY > window.innerHeight - margin) window.scrollBy(0, 12);
+
+                const others = [...list.querySelectorAll('li[data-chore-row-id]')].filter(r => r !== li);
+                const target = others.find(r => {
+                    const rect = r.getBoundingClientRect();
+                    return ev.clientY < rect.top + rect.height / 2;
+                });
+                const group = choreRowGroup(li);
+                const anchor = target || null;
+                if (anchor === group[group.length - 1].nextElementSibling) return;
+                if (anchor) group.forEach(n => list.insertBefore(n, anchor));
+                else group.forEach(n => list.appendChild(n));
+            };
+
+            const onUp = async () => {
+                handle.removeEventListener('pointermove', onMove);
+                handle.removeEventListener('pointerup', onUp);
+                handle.removeEventListener('pointercancel', onUp);
+                li.classList.remove('dragging');
+
+                const ids = currentChoreOrder(list);
+                if (ids.join(',') === orderBefore.join(',')) return;
+
+                const res = await API.post('/api/chores/reorder', { ids });
+                if (res.error) {
+                    showToast('Could not save the new order', 'error');
+                }
+                await loadChores();
+                renderSettings(main);
+            };
+
+            handle.addEventListener('pointermove', onMove);
+            handle.addEventListener('pointerup', onUp);
+            handle.addEventListener('pointercancel', onUp);
+        });
+    });
+}
+
 function bindSettingsEvents(main) {
     const emojiSets = { child: CHILD_EMOJIS, chore: CHORE_EMOJIS, reward: REWARD_EMOJIS };
+
+    setupChoreReorder(main);
 
     // --- Inline edit emoji pickers ---
     main.querySelectorAll('.edit-emoji-btn').forEach(btn => {
@@ -1425,6 +1620,8 @@ function bindSettingsEvents(main) {
             settingsContentTab = btn.dataset.settingsTab;
             editingChoreId = null;
             editingRewardId = null;
+            assigningChoreId = null;
+            assigningRewardId = null;
             renderSettings(main);
         });
     });
@@ -1452,7 +1649,7 @@ function bindSettingsEvents(main) {
         });
     });
 
-    // --- Assign buttons ---
+    // --- Assign buttons (child → chores/rewards) ---
     main.querySelectorAll('[data-assign]').forEach(btn => {
         btn.addEventListener('click', async () => {
             const id = parseInt(btn.dataset.id);
@@ -1466,8 +1663,32 @@ function bindSettingsEvents(main) {
         });
     });
 
-    // --- Assignment checkboxes ---
-    main.querySelectorAll('.assign-section input[type="checkbox"]').forEach(cb => {
+    // --- Assign buttons (chore/reward → children) ---
+    main.querySelectorAll('[data-assign-item]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const type = btn.dataset.assignItem;
+            const id = parseInt(btn.dataset.id);
+            if (type === 'chore') {
+                if (assigningChoreId === id) {
+                    assigningChoreId = null;
+                } else {
+                    assigningChoreId = id;
+                    await loadAllChildAssignments();
+                }
+            } else if (type === 'reward') {
+                if (assigningRewardId === id) {
+                    assigningRewardId = null;
+                } else {
+                    assigningRewardId = id;
+                    await loadAllChildAssignments();
+                }
+            }
+            renderSettings(main);
+        });
+    });
+
+    // --- Assignment checkboxes (child → chores/rewards) ---
+    main.querySelectorAll('.assign-section input[type="checkbox"][data-type]').forEach(cb => {
         cb.addEventListener('change', async () => {
             const childId = parseInt(cb.dataset.childId);
             const itemId = parseInt(cb.dataset.itemId);
@@ -1482,7 +1703,23 @@ function bindSettingsEvents(main) {
         });
     });
 
-    // --- Select All / Clear All ---
+    // --- Assignment checkboxes (chore/reward → children) ---
+    main.querySelectorAll('[data-assign-for]').forEach(cb => {
+        cb.addEventListener('change', async () => {
+            const childId = parseInt(cb.dataset.childId);
+            const itemId = parseInt(cb.dataset.itemId);
+            const type = cb.dataset.assignFor;
+            const url = type === 'chore'
+                ? `/api/children/${childId}/chores/${itemId}`
+                : `/api/children/${childId}/rewards/${itemId}`;
+            const result = await API.post(url);
+            if (!result.error) {
+                await loadChildAssignments(childId);
+            }
+        });
+    });
+
+    // --- Select All / Clear All (child → chores/rewards) ---
     main.querySelectorAll('[data-select-all]').forEach(btn => {
         btn.addEventListener('click', async () => {
             const type = btn.dataset.selectAll;
@@ -1514,6 +1751,47 @@ function bindSettingsEvents(main) {
                 await API.post(url);
             }
             await loadChildAssignments(childId);
+            renderSettings(main);
+        });
+    });
+
+    // --- Select All / Clear All (chore/reward → children) ---
+    main.querySelectorAll('[data-select-all-for]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const type = btn.dataset.selectAllFor;
+            const itemId = parseInt(btn.dataset.itemId);
+            for (const child of state.children) {
+                const assigned = type === 'chore'
+                    ? (state.childChores[child.id] || [])
+                    : (state.childRewards[child.id] || []);
+                if (!assigned.includes(itemId)) {
+                    const url = type === 'chore'
+                        ? `/api/children/${child.id}/chores/${itemId}`
+                        : `/api/children/${child.id}/rewards/${itemId}`;
+                    await API.post(url);
+                    await loadChildAssignments(child.id);
+                }
+            }
+            renderSettings(main);
+        });
+    });
+
+    main.querySelectorAll('[data-clear-all-for]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const type = btn.dataset.clearAllFor;
+            const itemId = parseInt(btn.dataset.itemId);
+            for (const child of state.children) {
+                const assigned = type === 'chore'
+                    ? (state.childChores[child.id] || [])
+                    : (state.childRewards[child.id] || []);
+                if (assigned.includes(itemId)) {
+                    const url = type === 'chore'
+                        ? `/api/children/${child.id}/chores/${itemId}`
+                        : `/api/children/${child.id}/rewards/${itemId}`;
+                    await API.post(url);
+                    await loadChildAssignments(child.id);
+                }
+            }
             renderSettings(main);
         });
     });

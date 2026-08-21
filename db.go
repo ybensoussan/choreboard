@@ -114,10 +114,43 @@ func migrate(db *sql.DB) error {
 	}
 
 	// Add recurring column if it doesn't exist
-	var hasRecurring bool
-	rows, err := db.Query("PRAGMA table_info(chores)")
-	if err != nil {
+	if ok, err := hasColumn(db, "chores", "recurring"); err != nil {
 		return err
+	} else if !ok {
+		if _, err := db.Exec("ALTER TABLE chores ADD COLUMN recurring INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+
+	// Add claim_frequency column to rewards if it doesn't exist
+	if ok, err := hasColumn(db, "rewards", "claim_frequency"); err != nil {
+		return err
+	} else if !ok {
+		if _, err := db.Exec("ALTER TABLE rewards ADD COLUMN claim_frequency TEXT NOT NULL DEFAULT 'continuous'"); err != nil {
+			return err
+		}
+	}
+
+	// Add sort_order column to chores if it doesn't exist (seed it with the
+	// current id order so existing boards keep the ordering they had)
+	if ok, err := hasColumn(db, "chores", "sort_order"); err != nil {
+		return err
+	} else if !ok {
+		if _, err := db.Exec("ALTER TABLE chores ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		if _, err := db.Exec("UPDATE chores SET sort_order = id"); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func hasColumn(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -127,45 +160,13 @@ func migrate(db *sql.DB) error {
 		var dfltValue sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
-			return err
+			return false, err
 		}
-		if name == "recurring" {
-			hasRecurring = true
-		}
-	}
-	if !hasRecurring {
-		if _, err := db.Exec("ALTER TABLE chores ADD COLUMN recurring INTEGER NOT NULL DEFAULT 0"); err != nil {
-			return err
+		if name == column {
+			return true, nil
 		}
 	}
-
-	// Add claim_frequency column to rewards if it doesn't exist
-	var hasClaimFreq bool
-	rows2, err := db.Query("PRAGMA table_info(rewards)")
-	if err != nil {
-		return err
-	}
-	defer rows2.Close()
-	for rows2.Next() {
-		var cid int
-		var name, ctype string
-		var notnull int
-		var dfltValue sql.NullString
-		var pk int
-		if err := rows2.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
-			return err
-		}
-		if name == "claim_frequency" {
-			hasClaimFreq = true
-		}
-	}
-	if !hasClaimFreq {
-		if _, err := db.Exec("ALTER TABLE rewards ADD COLUMN claim_frequency TEXT NOT NULL DEFAULT 'continuous'"); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return false, rows.Err()
 }
 
 func seed(db *sql.DB) error {
@@ -232,9 +233,9 @@ func seed(db *sql.DB) error {
 		}
 		return 0
 	}
-	for _, c := range chores {
-		_, err = db.Exec(`INSERT INTO chores (name, emoji, points, frequency, recurring) VALUES (?, ?, ?, ?, ?)`,
-			c.name, c.emoji, c.points, c.frequency, recurringInt(c.recurring))
+	for i, c := range chores {
+		_, err = db.Exec(`INSERT INTO chores (name, emoji, points, frequency, recurring, sort_order) VALUES (?, ?, ?, ?, ?, ?)`,
+			c.name, c.emoji, c.points, c.frequency, recurringInt(c.recurring), i+1)
 		if err != nil {
 			return err
 		}

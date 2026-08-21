@@ -62,6 +62,7 @@ func main() {
 			r.Post("/children/{id}/rewards/{rewardId}", h.ToggleChildReward)
 
 			r.Post("/chores", h.AddChore)
+			r.Post("/chores/reorder", h.ReorderChores)
 			r.Put("/chores/{id}", h.UpdateChore)
 			r.Delete("/chores/{id}", h.DeleteChore)
 

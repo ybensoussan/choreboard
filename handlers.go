@@ -49,6 +49,7 @@ type Chore struct {
 	Points    int    `json:"points"`
 	Frequency string `json:"frequency"`
 	Recurring bool   `json:"recurring"`
+	SortOrder int    `json:"sort_order"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -413,7 +414,7 @@ func (h *Handlers) GetPoints(w http.ResponseWriter, r *http.Request) {
 // --- Chores ---
 
 func (h *Handlers) ListChores(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query("SELECT id, name, emoji, points, frequency, recurring, created_at FROM chores ORDER BY id")
+	rows, err := h.db.Query("SELECT id, name, emoji, points, frequency, recurring, sort_order, created_at FROM chores ORDER BY sort_order, id")
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -423,7 +424,7 @@ func (h *Handlers) ListChores(w http.ResponseWriter, r *http.Request) {
 	chores := []Chore{}
 	for rows.Next() {
 		var c Chore
-		if err := rows.Scan(&c.ID, &c.Name, &c.Emoji, &c.Points, &c.Frequency, &c.Recurring, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.Name, &c.Emoji, &c.Points, &c.Frequency, &c.Recurring, &c.SortOrder, &c.CreatedAt); err != nil {
 			writeError(w, 500, err.Error())
 			return
 		}
@@ -452,14 +453,19 @@ func (h *Handlers) AddChore(w http.ResponseWriter, r *http.Request) {
 		c.Frequency = "daily"
 	}
 
-	result, err := h.db.Exec("INSERT INTO chores (name, emoji, points, frequency, recurring) VALUES (?, ?, ?, ?, ?)",
-		c.Name, c.Emoji, c.Points, c.Frequency, c.Recurring)
+	// New chores land at the bottom of the manual order
+	var nextOrder int
+	h.db.QueryRow("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM chores").Scan(&nextOrder)
+
+	result, err := h.db.Exec("INSERT INTO chores (name, emoji, points, frequency, recurring, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+		c.Name, c.Emoji, c.Points, c.Frequency, c.Recurring, nextOrder)
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
 	}
 	id, _ := result.LastInsertId()
 	c.ID = int(id)
+	c.SortOrder = nextOrder
 	writeJSON(w, 201, c)
 }
 
@@ -478,6 +484,41 @@ func (h *Handlers) UpdateChore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, c)
+}
+
+// ReorderChores rewrites the manual chore order from a full list of chore ids,
+// given in the order they should appear.
+func (h *Handlers) ReorderChores(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		IDs []int `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, 400, "Invalid JSON")
+		return
+	}
+	if len(input.IDs) == 0 {
+		writeError(w, 400, "ids is required")
+		return
+	}
+
+	tx, err := h.db.Begin()
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	defer tx.Rollback()
+
+	for i, id := range input.IDs {
+		if _, err := tx.Exec("UPDATE chores SET sort_order = ? WHERE id = ?", i+1, id); err != nil {
+			writeError(w, 500, err.Error())
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "reordered"})
 }
 
 func (h *Handlers) DeleteChore(w http.ResponseWriter, r *http.Request) {
@@ -954,7 +995,7 @@ func (h *Handlers) ExportDB(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Chores
-	rows2, err := h.db.Query("SELECT id, name, emoji, points, frequency, recurring, created_at FROM chores ORDER BY id")
+	rows2, err := h.db.Query("SELECT id, name, emoji, points, frequency, recurring, sort_order, created_at FROM chores ORDER BY id")
 	if err != nil {
 		writeError(w, 500, err.Error())
 		return
@@ -962,7 +1003,7 @@ func (h *Handlers) ExportDB(w http.ResponseWriter, r *http.Request) {
 	defer rows2.Close()
 	for rows2.Next() {
 		var c Chore
-		rows2.Scan(&c.ID, &c.Name, &c.Emoji, &c.Points, &c.Frequency, &c.Recurring, &c.CreatedAt)
+		rows2.Scan(&c.ID, &c.Name, &c.Emoji, &c.Points, &c.Frequency, &c.Recurring, &c.SortOrder, &c.CreatedAt)
 		export.Chores = append(export.Chores, c)
 	}
 
@@ -1070,8 +1111,13 @@ func (h *Handlers) ImportDB(w http.ResponseWriter, r *http.Request) {
 
 	// Insert chores
 	for _, c := range data.Chores {
-		_, err := tx.Exec("INSERT INTO chores (id, name, emoji, points, frequency, recurring, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			c.ID, c.Name, c.Emoji, c.Points, c.Frequency, c.Recurring, c.CreatedAt)
+		sortOrder := c.SortOrder
+		if sortOrder == 0 {
+			// Backups taken before manual ordering existed: fall back to id order
+			sortOrder = c.ID
+		}
+		_, err := tx.Exec("INSERT INTO chores (id, name, emoji, points, frequency, recurring, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			c.ID, c.Name, c.Emoji, c.Points, c.Frequency, c.Recurring, sortOrder, c.CreatedAt)
 		if err != nil {
 			writeError(w, 500, fmt.Sprintf("Failed to import chore: %v", err))
 			return

@@ -525,6 +525,67 @@ body {
 .date-today-btn:hover { transform: translate(1px, 1px); box-shadow: none; }
 
 /* ============================================
+   Chore Sort Bar
+   ============================================ */
+
+.chore-sort-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.chore-sort-label {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 0.7rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--on-surface-variant);
+    flex-shrink: 0;
+}
+
+.chore-sort-pills {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 3px 3px 6px 3px;
+    scrollbar-width: none;
+}
+
+.chore-sort-pills::-webkit-scrollbar { display: none; }
+
+.chore-sort-pill {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+    background: white;
+    color: var(--on-surface);
+    border: var(--border-2);
+    border-color: black;
+    border-radius: var(--radius-full);
+    padding: 6px 13px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    cursor: pointer;
+    box-shadow: var(--shadow-neo-xs);
+    transition: all 0.1s;
+}
+
+.chore-sort-pill:hover { transform: translate(1px, 1px); box-shadow: none; }
+.chore-sort-pill.active {
+    background: var(--secondary);
+    color: var(--secondary-on);
+    transform: translate(2px, 2px);
+    box-shadow: none;
+}
+
+.chore-sort-emoji { width: 14px; height: 14px; object-fit: contain; }
+
+/* ============================================
    Chore Cards
    ============================================ */
 
@@ -1501,6 +1562,40 @@ body {
     border: var(--border-2);
     border-color: black;
     flex-shrink: 0;
+}
+
+.reorder-hint {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--on-surface-variant);
+    margin-bottom: 6px;
+}
+
+.drag-handle {
+    background: none;
+    border: none;
+    padding: 0;
+    width: 22px;
+    height: 30px;
+    flex-shrink: 0;
+    color: var(--outline-variant);
+    cursor: grab;
+    touch-action: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.drag-handle svg { width: 18px; height: 18px; pointer-events: none; }
+.drag-handle:hover { color: var(--on-surface); }
+.drag-handle:active { cursor: grabbing; }
+
+.settings-list li.dragging {
+    background: var(--secondary);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-neo-sm);
+    border-bottom-color: transparent;
+    opacity: 0.95;
 }
 
 .edit-btn, .delete-btn, .assign-btn {
